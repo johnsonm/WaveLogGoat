@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+project_name: waveloggoat
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - openbsd
+    goarch:
+      - amd64
+      - 386
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: 386
+      - goos: freebsd
+        goarch: 386
+      - goos: openbsd
+        goarch: arm64
+
+archives:
+  - formats: [tar.gz]
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.html
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - '^chore:'
+      - 'Merge pull request'
+      - 'Merge branch'
+
+release:
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
