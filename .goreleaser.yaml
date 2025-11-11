@@ -47,7 +47,7 @@ archives:
       - goos: windows
         formats: [zip]
     files:
-      - README.html
+      - README.md
 
 changelog:
   sort: asc
