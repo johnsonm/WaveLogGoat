@@ -243,21 +243,21 @@ func (h *HamlibClient) GetData() (RigData, error) {
 	if _, err := fmt.Fprintf(conn, "m\n"); err != nil {
 		return RigData{}, fmt.Errorf("failed to send 'm' command to hamlib: %w", err)
 	}
-	modeResp, _, err := reader.ReadLine() // e.g., "USB 2400"
+	modeResp, _, err := reader.ReadLine() // e.g., "USB"
 	if err != nil {
 		return RigData{}, fmt.Errorf("failed to read mode response from hamlib: %w", err)
 	}
-	modeParts := strings.Fields(string(modeResp))
-	if len(modeParts) > 0 {
-		data.Mode = modeParts[0]
-		data.ModeB = modeParts[0] // Default modeB to Mode/RX for simplicity
-	} else {
-		return RigData{}, fmt.Errorf("invalid mode response format from hamlib: '%s'", modeResp)
+	data.Mode = modeResp
+	data.ModeB = modeResp
+
+	// Discard next line (bandwidth) directly following mode
+	if _, _, err := reader.ReadLine(); err != nil {
+		log.Warnf("Failed to read mode bandwidth response from hamlib: %v.", err)
 	}
 
 	// Query Power (P)
-	if _, err := fmt.Fprintf(conn, "P\n"); err != nil {
-		log.Warnf("Failed to send 'P' (power) command to hamlib: %v. Sending 0 W.", err)
+	if _, err := fmt.Fprintf(conn, "l RFPOWER\n"); err != nil {
+		log.Warnf("Failed to send 'l RFPOWER' (power) command to hamlib: %v. Sending 0 W.", err)
 		data.Power = 0.0
 	} else {
 		powerStr, _, err := reader.ReadLine()
@@ -265,14 +265,14 @@ func (h *HamlibClient) GetData() (RigData, error) {
 			log.Warnf("Failed to read power response from hamlib: %v. Sending 0 W.", err)
 			data.Power = 0.0
 		} else {
-			// Hamlib returns 0-100 float percentage
+			// Hamlib returns 0-1 float percentage
 			powerPercent, err := strconv.ParseFloat(string(powerStr), 64)
 			if err != nil {
 				log.Warnf("Failed to parse power '%s': %v. Sending 0 W.", powerStr, err)
 				data.Power = 0.0
 			} else {
 				// Convert percentage to 100W max for simple display (Wavelog typically expects watts)
-				data.Power = powerPercent
+				data.Power = powerPercent * 100
 			}
 		}
 	}
