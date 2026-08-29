@@ -81,6 +81,8 @@ type ProfileConfig struct {
 	LogLevel        string `json:"log_level"`        // "error", "warn", "info", "debug"
 	WebSocketEnable bool   `json:"websocket_enable"` // enable WebSocket server
 	WebSocketPort   int    `json:"websocket_port"`   // WebSocket server port (default: 54322)
+	QSYEnable       bool   `json:"qsy_enable"`       // enable QSY HTTP server
+	QSYPort         int    `json:"qsy_port"`         // QSY HTTP server port (default: 54321)
 }
 
 type ConfigFile struct {
@@ -91,6 +93,7 @@ type ConfigFile struct {
 // interface for interacting with a radio source (flrig or hamlib)
 type RadioClient interface {
 	GetData() (RigData, error)
+	SetData(freq float64, mode string) error
 }
 
 // implements RadioClient for XML-RPC communication with flrig
@@ -99,10 +102,52 @@ type FlrigClient struct {
 	Port int
 }
 
+func (f *FlrigClient) SetData(freq float64, mode string) error {
+	client, err := xmlrpc.NewClient(fmt.Sprintf("http://%s:%d/", f.Host, f.Port), nil)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if freq > 0 {
+		if err := client.Call("rig.set_frequency", freq, nil); err != nil {
+			return fmt.Errorf("call failed to rig.set_frequency: %w", err)
+		}
+	}
+	if mode != "" {
+		if err := client.Call("rig.set_mode", mode, nil); err != nil {
+			return fmt.Errorf("call failed to rig.set_mode: %w", err)
+		}
+	}
+	return nil
+}
+
 // implements RadioClient for TCP communication with rigctld / hamlib
 type HamlibClient struct {
 	Host string
 	Port int
+}
+
+func (h *HamlibClient) SetData(freq float64, mode string) error {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
+	if err != nil {
+		return fmt.Errorf("hamlib connection error: %w", err)
+	}
+	defer conn.Close()
+
+	if freq > 0 {
+		if _, err := fmt.Fprintf(conn, "F %.0f\n", freq); err != nil {
+			return fmt.Errorf("failed to send 'F' command to hamlib: %w", err)
+		}
+	}
+	if mode != "" {
+		// Hamlib mode command: M <mode> <passband>.
+		// Passband is optional, using 0 for default.
+		if _, err := fmt.Fprintf(conn, "M %s 0\n", mode); err != nil {
+			return fmt.Errorf("failed to send 'M' command to hamlib: %w", err)
+		}
+	}
+	return nil
 }
 
 func getConfigPath() (string, error) {
@@ -362,6 +407,11 @@ func broadcastToWavelog(server *WebSocketServer, message WebSocketMessage) {
 	log.Debugf("Broadcasted radio status to Wavelog: freq=%d, mode=%s", message.Frequency, message.Mode)
 }
 
+type QSYServer struct {
+	client RadioClient
+	port   int
+}
+
 func startWebSocketServer(port int) (*WebSocketServer, error) {
 	server := &WebSocketServer{
 		clients: make(map[*websocket.Conn]bool),
@@ -448,6 +498,61 @@ func startWebSocketServer(port int) (*WebSocketServer, error) {
 	return server, nil
 }
 
+func startQSYServer(client RadioClient, port int) (*http.Server, error) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// Path: /{freq} or /{freq}/{mode}
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
+		if parts[0] == "" {
+			http.Error(w, "Frequency required", http.StatusBadRequest)
+			return
+		}
+
+		hz, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid frequency", http.StatusBadRequest)
+			return
+		}
+		mode := ""
+		if len(parts) > 1 {
+			mode = parts[1]
+		}
+
+		err = client.SetData(float64(hz), mode)
+		if err != nil {
+			log.Errorf("QSY command failed: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Write([]byte("OK"))
+	})
+
+	httpServer := &http.Server{
+		Addr:    ":" + strconv.Itoa(port),
+		Handler: mux,
+	}
+
+	log.Infof("Starting QSY HTTP server on port %d", port)
+	log.Infof("QSY endpoint: http://localhost:%d/{freq}/{mode}", port)
+
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("QSY server error: %v", err)
+		}
+	}()
+
+	return httpServer, nil
+}
+
+
 func main() {
 	defaultConfig := ProfileConfig{
 		WavelogURL:      "http://localhost/index.php",
@@ -462,6 +567,8 @@ func main() {
 		LogLevel:        "error",
 		WebSocketEnable: true,
 		WebSocketPort:   54322,
+		QSYEnable:       false,
+		QSYPort:         54321,
 	}
 
 	var currentProfileName string
@@ -486,6 +593,8 @@ func main() {
 	logLevel := flag.String("log-level", defaultConfig.LogLevel, "Logging level: 'debug', 'info', 'warn', or 'error'.")
 	websocketEnable := flag.Bool("websocket-enable", defaultConfig.WebSocketEnable, "Enable WebSocket server for real-time radio status.")
 	websocketPort := flag.Int("websocket-port", defaultConfig.WebSocketPort, "WebSocket server port (default: 54322).")
+	qsyEnable := flag.Bool("qsy-enable", defaultConfig.QSYEnable, "Enable QSY HTTP server.")
+	qsyPort := flag.Int("qsy-port", defaultConfig.QSYPort, "QSY HTTP server port (default: 54321).")
 
 	// Parse flags initially to handle the special -save-profile and -set-default-profile flags
 	flag.Parse()
@@ -556,6 +665,10 @@ func main() {
 			currentProfileConfig.WebSocketEnable = *websocketEnable
 		case "websocket-port":
 			currentProfileConfig.WebSocketPort = *websocketPort
+		case "qsy-enable":
+			currentProfileConfig.QSYEnable = *qsyEnable
+		case "qsy-port":
+			currentProfileConfig.QSYPort = *qsyPort
 		}
 	})
 
@@ -619,11 +732,21 @@ func main() {
 		}
 	}
 
+	if currentProfileConfig.QSYEnable {
+		_, err := startQSYServer(client, currentProfileConfig.QSYPort)
+		if err != nil {
+			log.Errorf("Failed to start QSY server: %v", err)
+		}
+	}
+
 	var lastData RigData
 	lastUpdate := time.Time{}
 	log.Infof("Starting WaveLogGoat polling every %s...", intervalDuration)
 	if currentProfileConfig.WebSocketEnable {
 		log.Infof("WebSocket server enabled on port %d", currentProfileConfig.WebSocketPort)
+	}
+	if currentProfileConfig.QSYEnable {
+		log.Infof("QSY server enabled on port %d", currentProfileConfig.QSYPort)
 	}
 
 	for {

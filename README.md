@@ -70,11 +70,15 @@ The easiest way to get started is by using command-line flags to create and save
 ./waveloggoat \
     -save-profile="IC-7300" \
     -wavelog-url="https://mywavelog.com/index.php" \
-    -wavelog-key="MY-API-KEY" \
+    -wavelog-key="wl2_MY-API-KEY" \
     -radio-name="IC-7300" \
     -data-source="flrig" \
     -flrig-host="127.0.0.1" \
-    -flrig-port=12345
+    -flrig-port=12345 \
+    -websocket-enable \
+    -websocket-port=54322 \
+    -qsy-enable \
+    -qsy-port=54321
 ```
 
 This command creates the `config.json` file (if it doesn't exist) and saves these settings.
@@ -129,6 +133,10 @@ Usage of ./waveloggoat:
     	Logging level: 'debug', 'info', 'warn', or 'error'. (default "error")
   -profile string
     	Select a named configuration profile to run (overrides default).
+  -qsy-enable
+    	Enable QSY HTTP server.
+  -qsy-port int
+    	QSY HTTP server port (default: 54321). (default 54321)
   -radio-name string
     	Name of the radio (e.g., FT-891). (default "RIG")
   -save-profile string
@@ -137,10 +145,14 @@ Usage of ./waveloggoat:
     	Sets the default profile to the specified name and exits.
   -version
     	Print version information and exit
-  -wavelog-key string
-    	Wavelog API Key, starting with `wl2_`. (default "wl2_YOUR_API_KEY")
+  -wavelog-key wl2_
+    	Wavelog API Key, starting with wl2_. (default "wl2_YOUR_API_KEY")
   -wavelog-url string
     	Wavelog API URL for radio status. (default "http://localhost/index.php")
+  -websocket-enable
+    	Enable WebSocket server for real-time radio status. (default true)
+  -websocket-port int
+    	WebSocket server port (default: 54322). (default 54322)
 ```
 
 ### Wavelog API Format
