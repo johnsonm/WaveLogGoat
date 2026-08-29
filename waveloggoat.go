@@ -15,8 +15,10 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/kolo/xmlrpc"
 	"github.com/sirupsen/logrus"
 )
@@ -25,6 +27,19 @@ var log = logrus.New()
 
 // version is set at build time using ldflags
 var version = "dev"
+
+// WebSocketMessage represents the JSON message sent to wavelog
+// Matches WaveLogGate format exactly
+type WebSocketMessage struct {
+	Type         string  `json:"type"`          // radio_status
+	Message      string  `json:"message,omitempty"` // Welcome message only
+	Frequency    int     `json:"frequency,omitempty"`    // Frequency in Hz
+	FrequencyRX  int     `json:"frequency_rx,omitempty"` // RX frequency for split mode
+	Mode         string  `json:"mode,omitempty"`        // Operating mode
+	Power        int     `json:"power,omitempty"`       // Power in watts
+	Radio        string  `json:"radio,omitempty"`       // Radio name
+	Timestamp    int64   `json:"timestamp,omitempty"`   // Unix timestamp
+}
 
 // RigData holds the radio state as provided by flrig or hamlib.
 type RigData struct {
@@ -44,8 +59,6 @@ type WavelogJSONRequest struct {
 	Mode        string  `json:"mode"`
 	FrequencyRX int     `json:"frequency_rx,omitempty"`
 	ModeRX      string  `json:"mode_rx,omitempty"`
-	// Split may come in a later WaveLog version
-	// PTT may come in a a later WaveLog version
 }
 
 type WavelogErrorResponse struct {
@@ -56,16 +69,18 @@ type WavelogErrorResponse struct {
 }
 
 type ProfileConfig struct {
-	WavelogURL string `json:"wavelog_url"`
-	WavelogKey string `json:"wavelog_key"`
-	RadioName  string `json:"radio_name"`
-	FlrigHost  string `json:"flrig_host"`
-	FlrigPort  int    `json:"flrig_port"`
-	HamlibHost string `json:"hamlib_host"`
-	HamlibPort int    `json:"hamlib_port"`
-	Interval   string `json:"interval"`
-	DataSource string `json:"data_source"` // "flrig" or "hamlib"
-	LogLevel   string `json:"log_level"`   // "error", "warn", "info", "debug"
+	WavelogURL      string `json:"wavelog_url"`
+	WavelogKey      string `json:"wavelog_key"`
+	RadioName       string `json:"radio_name"`
+	FlrigHost       string `json:"flrig_host"`
+	FlrigPort       int    `json:"flrig_port"`
+	HamlibHost      string `json:"hamlib_host"`
+	HamlibPort      int    `json:"hamlib_port"`
+	Interval        string `json:"interval"`
+	DataSource      string `json:"data_source"`      // "flrig" or "hamlib"
+	LogLevel        string `json:"log_level"`        // "error", "warn", "info", "debug"
+	WebSocketEnable bool   `json:"websocket_enable"` // enable WebSocket server
+	WebSocketPort   int    `json:"websocket_port"`   // WebSocket server port (default: 54322)
 }
 
 type ConfigFile struct {
@@ -323,18 +338,133 @@ func postToWavelog(config ProfileConfig, data RigData) error {
 	return nil
 }
 
+type WebSocketServer struct {
+	clients    map[*websocket.Conn]bool
+	clientsMu  sync.RWMutex
+	upgrader   websocket.Upgrader
+	port       int
+}
+
+func broadcastToWavelog(server *WebSocketServer, message WebSocketMessage) {
+	messageBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Errorf("Failed to marshal WebSocket message: %v", err)
+		return
+	}
+
+	server.clientsMu.RLock()
+	defer server.clientsMu.RUnlock()
+
+	for client := range server.clients {
+		if err := client.WriteMessage(websocket.TextMessage, messageBytes); err != nil {
+			log.Errorf("Failed to send message to Wavelog: %v", err)
+			client.Close()
+			delete(server.clients, client)
+		}
+	}
+	log.Debugf("Broadcasted radio status to Wavelog: freq=%d, mode=%s", message.Frequency, message.Mode)
+}
+
+func startWebSocketServer(port int) (*WebSocketServer, error) {
+	server := &WebSocketServer{
+		clients: make(map[*websocket.Conn]bool),
+		port:    port,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Upgrade HTTP connection to WebSocket
+		conn, err := server.upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Debugf("WebSocket upgrade failed: %v", err)
+			return
+		}
+
+		server.clientsMu.Lock()
+		server.clients[conn] = true
+		server.clientsMu.Unlock()
+
+		log.Infof("WebSocket client connected")
+
+		welcomeMsg := WebSocketMessage{
+			Type:    "welcome",
+			Message: "Connected to WaveLogGoat WebSocket server",
+		}
+		welcomeBytes, err := json.Marshal(welcomeMsg)
+		if err != nil {
+			log.Errorf("Failed to marshal welcome message: %v", err)
+			conn.Close()
+			server.clientsMu.Lock()
+			delete(server.clients, conn)
+			server.clientsMu.Unlock()
+			return
+		}
+
+		if err := conn.WriteMessage(websocket.TextMessage, welcomeBytes); err != nil {
+			log.Errorf("Failed to send welcome message: %v", err)
+			conn.Close()
+			server.clientsMu.Lock()
+			delete(server.clients, conn)
+			server.clientsMu.Unlock()
+			return
+		}
+
+		defer func() {
+			conn.Close()
+			server.clientsMu.Lock()
+			delete(server.clients, conn)
+			server.clientsMu.Unlock()
+			log.Infof("WebSocket client disconnected")
+		}()
+
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Errorf("WebSocket error: %v", err)
+				}
+				break
+			}
+			// WaveLogGate doesn't process incoming messages, just ignore them
+		}
+	})
+
+	httpServer := &http.Server{
+		Addr:    ":" + strconv.Itoa(port),
+		Handler: mux,
+	}
+
+	log.Infof("Starting WebSocket server on port %d", port)
+	log.Infof("WebSocket endpoint: ws://localhost:%d/", port)
+
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("WebSocket server error: %v", err)
+		}
+	}()
+
+	return server, nil
+}
+
 func main() {
 	defaultConfig := ProfileConfig{
-		WavelogURL: "http://localhost/index.php",
-		WavelogKey: "wl2_YOUR_API_KEY",
-		RadioName:  "RIG",
-		FlrigHost:  "127.0.0.1",
-		FlrigPort:  12345,
-		HamlibHost: "127.0.0.1",
-		HamlibPort: 4532,
-		Interval:   "1s",
-		DataSource: "flrig",
-		LogLevel:   "error",
+		WavelogURL:      "http://localhost/index.php",
+		WavelogKey:      "wl2_YOUR_API_KEY",
+		RadioName:       "RIG",
+		FlrigHost:       "127.0.0.1",
+		FlrigPort:       12345,
+		HamlibHost:      "127.0.0.1",
+		HamlibPort:      4532,
+		Interval:        "1s",
+		DataSource:      "flrig",
+		LogLevel:        "error",
+		WebSocketEnable: true,
+		WebSocketPort:   54322,
 	}
 
 	var currentProfileName string
@@ -357,6 +487,8 @@ func main() {
 	interval := flag.String("interval", defaultConfig.Interval, "Polling interval (e.g., 1s, 1500ms).")
 	dataSource := flag.String("data-source", defaultConfig.DataSource, "Data source: 'flrig' or 'hamlib'.")
 	logLevel := flag.String("log-level", defaultConfig.LogLevel, "Logging level: 'debug', 'info', 'warn', or 'error'.")
+	websocketEnable := flag.Bool("websocket-enable", defaultConfig.WebSocketEnable, "Enable WebSocket server for real-time radio status.")
+	websocketPort := flag.Int("websocket-port", defaultConfig.WebSocketPort, "WebSocket server port (default: 54322).")
 
 	// Parse flags initially to handle the special -save-profile and -set-default-profile flags
 	flag.Parse()
@@ -423,6 +555,10 @@ func main() {
 			currentProfileConfig.DataSource = *dataSource
 		case "log-level":
 			currentProfileConfig.LogLevel = *logLevel
+		case "websocket-enable":
+			currentProfileConfig.WebSocketEnable = *websocketEnable
+		case "websocket-port":
+			currentProfileConfig.WebSocketPort = *websocketPort
 		}
 	})
 
@@ -477,9 +613,21 @@ func main() {
 		log.Fatalf("Fatal: Invalid interval duration format: %v", err)
 	}
 
+	var webSocketServer *WebSocketServer
+	if currentProfileConfig.WebSocketEnable {
+		var err error
+		webSocketServer, err = startWebSocketServer(currentProfileConfig.WebSocketPort)
+		if err != nil {
+			log.Errorf("Failed to start WebSocket server: %v", err)
+		}
+	}
+
 	var lastData RigData
 	lastUpdate := time.Time{}
 	log.Infof("Starting WaveLogGoat polling every %s...", intervalDuration)
+	if currentProfileConfig.WebSocketEnable {
+		log.Infof("WebSocket server enabled on port %d", currentProfileConfig.WebSocketPort)
+	}
 
 	for {
 		time.Sleep(intervalDuration)
@@ -513,5 +661,23 @@ func main() {
 		lastData = currentData
 		lastUpdate = time.Now()
 		log.Debug("Successfully updated Wavelog.")
+
+		// Broadcast to WebSocket clients if enabled
+		if currentProfileConfig.WebSocketEnable && webSocketServer != nil {
+			wsMessage := WebSocketMessage{
+				Type:      "radio_status",
+				Frequency: int(currentData.FreqVFOA),
+				Mode:      currentData.Mode,
+				Power:     int(currentData.Power),
+				Radio:     currentProfileConfig.RadioName,
+				Timestamp: time.Now().Unix(),
+			}
+			// Include frequency_rx for split mode (exactly like WaveLogGate)
+			if currentData.Split != 0 {
+				wsMessage.FrequencyRX = int(currentData.FreqVFOA)
+				wsMessage.Frequency = int(currentData.FreqVFOB)
+			}
+			broadcastToWavelog(webSocketServer, wsMessage)
+		}
 	}
 }
