@@ -326,7 +326,7 @@ func postToWavelog(config ProfileConfig, data RigData) error {
 func main() {
 	defaultConfig := ProfileConfig{
 		WavelogURL: "http://localhost/index.php",
-		WavelogKey: "YOUR_API_KEY",
+		WavelogKey: "wl2_YOUR_API_KEY",
 		RadioName:  "RIG",
 		FlrigHost:  "127.0.0.1",
 		FlrigPort:  12345,
@@ -348,7 +348,7 @@ func main() {
 	flag.StringVar(&setDefaultProfileName, "set-default-profile", "", "Sets the default profile to the specified name and exits.")
 
 	wavelogURL := flag.String("wavelog-url", defaultConfig.WavelogURL, "Wavelog API URL for radio status.")
-	wavelogKey := flag.String("wavelog-key", defaultConfig.WavelogKey, "Wavelog API Key.")
+	wavelogKey := flag.String("wavelog-key", defaultConfig.WavelogKey, "Wavelog API Key, starting with `wl2_`.")
 	radioName := flag.String("radio-name", defaultConfig.RadioName, "Name of the radio (e.g., FT-891).")
 	flrigHost := flag.String("flrig-host", defaultConfig.FlrigHost, "flrig XML-RPC host address.")
 	flrigPort := flag.Int("flrig-port", defaultConfig.FlrigPort, "flrig XML-RPC port.")

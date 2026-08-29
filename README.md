@@ -138,21 +138,21 @@ Usage of ./waveloggoat:
   -version
     	Print version information and exit
   -wavelog-key string
-    	Wavelog API Key. (default "YOUR_API_KEY")
+    	Wavelog API Key, starting with `wl2_`. (default "wl2_YOUR_API_KEY")
   -wavelog-url string
     	Wavelog API URL for radio status. (default "http://localhost/index.php")
 ```
 
 ### Wavelog API Format
 
-This tool sends data to Wavelog using the new JSON format:
+This tool sends data to Wavelog using the JSON format:
 
-- **Endpoint:** `(your-wavelog-url)/api/radio` (The `/api/radio` path is added automatically)
+- **Endpoint:** `(your-wavelog-url)/api/v2/radio` (The `/api/v2/radio` path is added automatically; the old /api/radio API is not supported)
 - **Method:** `POST`
+- **Header:** `Authorization: Bearer wl2_YOUR_API_KEY`
 - **Body (JSON):**
   ```json
   {
-    "key": "YOUR_API_KEY",
     "radio": "IC-7300",
     "power": 100,
     "frequency": 14074000,
