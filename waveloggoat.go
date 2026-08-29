@@ -213,9 +213,6 @@ func (f *FlrigClient) GetData() (RigData, error) {
 	return data, nil
 }
 
-// Hamlib support is UNTESTED and was partially confabulated ("hallucinated") by Gemini, so it
-// is very unlikely to actually work. Please report errors in order to fix it.
-
 func (h *HamlibClient) GetData() (RigData, error) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
 	if err != nil {
@@ -247,8 +244,8 @@ func (h *HamlibClient) GetData() (RigData, error) {
 	if err != nil {
 		return RigData{}, fmt.Errorf("failed to read mode response from hamlib: %w", err)
 	}
-	data.Mode = modeResp
-	data.ModeB = modeResp
+	data.Mode = string(modeResp)
+	data.ModeB = string(modeResp)
 
 	// Discard next line (bandwidth) directly following mode
 	if _, _, err := reader.ReadLine(); err != nil {

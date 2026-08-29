@@ -8,7 +8,7 @@ This tool replaces the JavaScript-based `WaveLogGate` with a single, statically 
 
 - **Dual Data Source:** Supports both `flrig` and `hamlib` (`rigctld`).
     - The `flrig` support is tested and known to function with flrig running on Fedora and an IC-7300
-    - **Warning:** hamlib/rigctld was confabulated by an LLM and may be functional or fictional. Please report either success or failure.
+    - hamlib/rigctld is reported working by mattmelling
 - **Configuration Profiles:** Manage multiple radio/Wavelog setups within a single `config.json` file.
 - **Command-Line Control:** All configuration options can be set via command-line flags, which override file settings.
 - **Easy Configuration:** Persist your settings using the `-save-profile` flag.
