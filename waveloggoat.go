@@ -48,6 +48,13 @@ type WavelogJSONRequest struct {
 	// PTT may come in a a later WaveLog version
 }
 
+type WavelogErrorResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 type ProfileConfig struct {
 	WavelogURL string `json:"wavelog_url"`
 	WavelogKey string `json:"wavelog_key"`
@@ -301,6 +308,15 @@ func postToWavelog(config ProfileConfig, data RigData) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+
+		// Check for v1/v2 key mismatch
+		var errResp WavelogErrorResponse
+		if err := json.Unmarshal(body, &errResp); err == nil {
+			if errResp.Error.Code == "invalid_token" && strings.Contains(errResp.Error.Message, "legacy v1 API keys are not accepted") {
+				log.Fatalf("Fatal: API v2 requires a wl2_ token. Please mint a new v2 token in Wavelog 'API Keys' with `radio:read` and `radio:write` scopes.")
+			}
+		}
+
 		return fmt.Errorf("wavelog API returned non-200 status code: %d. Body: %s", resp.StatusCode, string(body))
 	}
 
