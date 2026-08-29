@@ -38,7 +38,6 @@ type RigData struct {
 
 // WavelogJSONRequest matches the required JSON payload for the Wavelog API update.
 type WavelogJSONRequest struct {
-	Key         string  `json:"key"`
 	Radio       string  `json:"radio"`
 	Power       float64 `json:"power"`
 	Frequency   int     `json:"frequency"`
@@ -265,7 +264,6 @@ func (h *HamlibClient) GetData() (RigData, error) {
 
 func postToWavelog(config ProfileConfig, data RigData) error {
 	payload := WavelogJSONRequest{
-		Key:       config.WavelogKey,
 		Radio:     config.RadioName,
 		Power:     data.Power,
 		Frequency: int(data.FreqVFOA),
@@ -282,7 +280,7 @@ func postToWavelog(config ProfileConfig, data RigData) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON payload: %w", err)
 	}
-	url := config.WavelogURL + "/api/radio"
+	url := config.WavelogURL + "/api/v2/radio"
 	log.Infof("Sending to %s: %s", url, string(jsonPayload))
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
@@ -292,6 +290,7 @@ func postToWavelog(config ProfileConfig, data RigData) error {
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer " + config.WavelogKey)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
