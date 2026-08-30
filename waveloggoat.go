@@ -3,11 +3,18 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -81,9 +88,13 @@ type ProfileConfig struct {
 	LogLevel        string `json:"log_level"`        // "error", "warn", "info", "debug"
 	WebSocketEnable bool   `json:"websocket_enable"` // enable WebSocket server
 	WebSocketPort   int    `json:"websocket_port"`   // WebSocket server port (default: 54322)
-	QSYEnable       bool   `json:"qsy_enable"`       // enable QSY HTTP server
-	QSYPort         int    `json:"qsy_port"`         // QSY HTTP server port (default: 54321)
-}
+	WSSEnable       bool   `json:"wss_enable"`       // enable WebSocket Secure server
+	WSSPort         int    `json:"wss_port"`         // WebSocket Secure server port (default: 54323)
+	QSYEnable       bool   `json:"qsy_enable"`       // enable HTTP QSY server
+	QSYPort         int    `json:"qsy_port"`         // HTTP QSY server port (default: 54321)
+	QSYEnableSSL    bool   `json:"qsy_enable_ssl"`   // enable HTTPS for QSY server (dual HTTP/HTTPS)
+	}
+
 
 type ConfigFile struct {
 	DefaultProfile string                   `json:"default_profile"`
@@ -168,6 +179,182 @@ func getConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(configDir, "config.json"), nil
+}
+
+// getCertDir returns the directory where SSL certificates are stored
+func getCertDir() (string, error) {
+	var configDir string
+	switch runtime.GOOS {
+	case "windows":
+		configDir = os.Getenv("APPDATA")
+	case "darwin":
+		configDir = filepath.Join(os.Getenv("HOME"), "Library", "Application Support")
+	case "linux":
+		configDir = filepath.Join(os.Getenv("HOME"), ".config")
+	default:
+		return "", fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+	configDir = filepath.Join(configDir, "WaveLogGoat")
+	err := os.MkdirAll(configDir, 0755)
+	if err != nil {
+		return "", err
+	}
+	return configDir, nil
+}
+
+// generateCertificate generates a self-signed SSL certificate for localhost
+func generateCertificate() ([]byte, []byte, error) {
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"WaveLogGoat"},
+			CommonName:   "127.0.0.1",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour * 10), // 10 years
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost", "127.0.0.1", "::1"},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privKey.PublicKey, privKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	privKeyBytes, err := x509.MarshalECPrivateKey(privKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal private key: %w", err)
+	}
+	privKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privKeyBytes})
+
+	return certPEM, privKeyPEM, nil
+}
+
+// loadOrCreateCertificate loads existing certificates or generates new ones
+func loadOrCreateCertificate() (certPath, keyPath string, err error) {
+	certDir, err := getCertDir()
+	if err != nil {
+		return "", "", err
+	}
+
+	certPath = filepath.Join(certDir, "waveloggoat.crt")
+	keyPath = filepath.Join(certDir, "waveloggoat.key")
+
+	// Check if certificate already exists
+	if _, err := os.Stat(certPath); err == nil {
+		if _, err := os.Stat(keyPath); err == nil {
+			log.Debugf("Using existing SSL certificates from %s", certDir)
+			return certPath, keyPath, nil
+		}
+	}
+
+	log.Infof("Generating new SSL certificates in %s", certDir)
+
+	certPEM, keyPEM, err := generateCertificate()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate certificate: %w", err)
+	}
+
+	// Write certificate
+	if err := os.WriteFile(certPath, certPEM, 0600); err != nil {
+		return "", "", fmt.Errorf("failed to write certificate file: %w", err)
+	}
+
+	// Write private key
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		return "", "", fmt.Errorf("failed to write key file: %w", err)
+	}
+
+	log.Infof("SSL certificates generated successfully")
+	log.Infof("Certificate: %s", certPath)
+	log.Infof("Private key: %s", keyPath)
+
+	// Print installation instructions
+	printCertInstallInstructions(certPath)
+
+	return certPath, keyPath, nil
+}
+
+// printCertInstallInstructions prints platform-specific certificate installation instructions
+func printCertInstallInstructions(certPath string) {
+	log.Infof("")
+	log.Infof("=" + strings.Repeat("=", 70))
+	log.Infof("SSL Certificate Installation Required")
+	log.Infof("=" + strings.Repeat("=", 70))
+	log.Infof("")
+	log.Infof("WaveLogGoat has generated a self-signed SSL certificate for HTTPS support.")
+	log.Infof("For browsers to trust this certificate, it must be installed in your")
+	log.Infof("system's certificate trust store.")
+	log.Infof("")
+	log.Infof("Certificate location: %s", certPath)
+	log.Infof("")
+	log.Infof("Platform-specific installation instructions:")
+	log.Infof("")
+
+	switch runtime.GOOS {
+	case "darwin":
+		log.Infof("macOS:")
+		log.Infof("  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain %s", certPath)
+		log.Infof("")
+		log.Infof("Alternative (via GUI):")
+		log.Infof("  1. Open Keychain Access (Applications > Utilities > Keychain Access)")
+		log.Infof("  2. Drag the certificate file into the 'System' keychain")
+		log.Infof("  3. Find the certificate, double-click it, and expand 'Trust'")
+		log.Infof("  4. Set 'When using this certificate' to 'Always Trust'")
+		log.Infof("  5. Close the dialog and enter your password if prompted")
+	case "windows":
+		log.Infof("Windows:")
+		log.Infof("  certutil -addstore -f Root %s", certPath)
+		log.Infof("")
+		log.Infof("Alternative (via GUI):")
+		log.Infof("  1. Double-click the certificate file")
+		log.Infof("  2. Click 'Install Certificate'")
+		log.Infof("  3. Select 'Local Machine' > Next")
+		log.Infof("  4. Select 'Place all certificates in the following store'")
+		log.Infof("  5. Click 'Browse' and select 'Trusted Root Certification Authorities'")
+		log.Infof("  6. Click Finish")
+	case "linux":
+		log.Infof("Linux (varies by distribution):")
+		log.Infof("")
+		log.Infof("Debian/Ubuntu:")
+		log.Infof("  sudo cp %s /usr/local/share/ca-certificates/waveloggoat.crt", certPath)
+		log.Infof("  sudo update-ca-certificates")
+		log.Infof("")
+		log.Infof("Fedora/RHEL/CentOS:")
+		log.Infof("  sudo cp %s /etc/pki/ca-trust/source/anchors/waveloggoat.crt", certPath)
+		log.Infof("  sudo update-ca-trust")
+		log.Infof("")
+		log.Infof("Arch Linux:")
+		log.Infof("  sudo trust anchor %s", certPath)
+		log.Infof("")
+		log.Infof("Alternative (via browser):")
+		log.Infof("  Some browsers (like Firefox) manage their own certificate store.")
+		log.Infof("  You may need to import the certificate directly in your browser settings.")
+	default:
+		log.Infof("See your operating system's documentation for installing CA certificates.")
+	}
+
+	log.Infof("")
+	log.Infof("After installation, restart your browser for changes to take effect.")
+	log.Infof("")
+	log.Infof("=" + strings.Repeat("=", 70))
+	log.Infof("")
 }
 
 func loadConfig(path string) (ConfigFile, error) {
@@ -498,18 +685,110 @@ func startWebSocketServer(port int) (*WebSocketServer, error) {
 	return server, nil
 }
 
-func startQSYServer(client RadioClient, port int) (*http.Server, error) {
+// startWSSServer starts a WebSocket Secure server (WSS)
+func startWSSServer(port int, certPath, keyPath string) (*WebSocketServer, error) {
+	server := &WebSocketServer{
+		clients: make(map[*websocket.Conn]bool),
+		port:    port,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		},
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Upgrade HTTP connection to WebSocket
+		conn, err := server.upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Debugf("WebSocket upgrade failed: %v", err)
+			return
+		}
+
+		server.clientsMu.Lock()
+		server.clients[conn] = true
+		server.clientsMu.Unlock()
+
+		log.Infof("WebSocket Secure client connected")
+
+		welcomeMsg := WebSocketMessage{
+			Type:    "welcome",
+			Message: "Connected to WaveLogGoat WebSocket Secure server",
+		}
+		welcomeBytes, err := json.Marshal(welcomeMsg)
+		if err != nil {
+			log.Errorf("Failed to marshal welcome message: %v", err)
+			conn.Close()
+			server.clientsMu.Lock()
+			delete(server.clients, conn)
+			server.clientsMu.Unlock()
+			return
+		}
+
+		if err := conn.WriteMessage(websocket.TextMessage, welcomeBytes); err != nil {
+			log.Errorf("Failed to send welcome message: %v", err)
+			conn.Close()
+			server.clientsMu.Lock()
+			delete(server.clients, conn)
+			server.clientsMu.Unlock()
+			return
+		}
+
+		defer func() {
+			conn.Close()
+			server.clientsMu.Lock()
+			delete(server.clients, conn)
+			server.clientsMu.Unlock()
+			log.Infof("WebSocket Secure client disconnected")
+		}()
+
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Errorf("WebSocket Secure error: %v", err)
+				}
+				break
+			}
+			// WaveLogGate doesn't process incoming messages, just ignore them
+		}
+	})
+
+	httpsServer := &http.Server{
+		Addr:    ":" + strconv.Itoa(port),
+		Handler: mux,
+	}
+
+	log.Infof("Starting WebSocket Secure server on port %d", port)
+	log.Infof("WSS endpoint: wss://localhost:%d/", port)
+
+	go func() {
+		if err := httpsServer.ListenAndServeTLS(certPath, keyPath); err != nil && err != http.ErrServerClosed {
+			log.Errorf("WebSocket Secure server error: %v", err)
+		}
+	}()
+
+	return server, nil
+}
+
+// qsyHandler creates the QSY HTTP handler function
+func qsyHandler(client RadioClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight OPTIONS requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 
 		// Path: /{freq} or /{freq}/{mode}
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
+		path := strings.Trim(r.URL.Path, "/")
+		parts := strings.Split(path, "/")
 		if parts[0] == "" {
 			http.Error(w, "Frequency required", http.StatusBadRequest)
 			return
@@ -525,29 +804,70 @@ func startQSYServer(client RadioClient, port int) (*http.Server, error) {
 			mode = parts[1]
 		}
 
-		err = client.SetData(float64(hz), mode)
-		if err != nil {
-			log.Errorf("QSY command failed: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Set frequency and mode
+		if err := client.SetData(float64(hz), strings.ToUpper(mode)); err != nil {
+			log.Warnf("QSY failed - radio control software may not be running: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			response := map[string]string{
+				"error":   "QSY failed: radio control software not available",
+				"details": err.Error(),
+			}
+			json.NewEncoder(w).Encode(response)
 			return
 		}
 
-		w.Write([]byte("OK"))
-	})
+		log.Infof("QSY successful: frequency=%d Hz, mode=%s", hz, strings.ToUpper(mode))
 
+		// Return success response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		response := map[string]interface{}{
+			"status":    "success",
+			"message":   fmt.Sprintf("QSY successful: frequency=%d Hz, mode=%s", hz, strings.ToUpper(mode)),
+			"frequency": hz,
+			"mode":      strings.ToUpper(mode),
+		}
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func startQSYServer(client RadioClient, port int, enableSSL bool, certPath, keyPath string) (*http.Server, error) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", qsyHandler(client))
+
+	// Start HTTP server
 	httpServer := &http.Server{
 		Addr:    ":" + strconv.Itoa(port),
 		Handler: mux,
 	}
 
 	log.Infof("Starting QSY HTTP server on port %d", port)
-	log.Infof("QSY endpoint: http://localhost:%d/{freq}/{mode}", port)
+	log.Infof("QSY endpoint: http://localhost:%d/{frequency}/{mode}", port)
 
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Errorf("QSY server error: %v", err)
+			log.Errorf("QSY HTTP server error: %v", err)
 		}
 	}()
+
+	// Start HTTPS server if SSL is enabled
+	if enableSSL {
+		httpsServer := &http.Server{
+			Addr:    ":" + strconv.Itoa(port),
+			Handler: mux,
+		}
+
+		log.Infof("Starting QSY HTTPS server on port %d", port)
+		log.Infof("QSY HTTPS endpoint: https://localhost:%d/{frequency}/{mode}", port)
+		log.Infof("Example: curl -k https://localhost:%d/7155000/LSB", port)
+
+		go func() {
+			if err := httpsServer.ListenAndServeTLS(certPath, keyPath); err != nil && err != http.ErrServerClosed {
+				log.Errorf("QSY HTTPS server error: %v", err)
+			}
+		}()
+	}
 
 	return httpServer, nil
 }
@@ -567,8 +887,11 @@ func main() {
 		LogLevel:        "error",
 		WebSocketEnable: true,
 		WebSocketPort:   54322,
+		WSSEnable:       false,
+		WSSPort:         54323,
 		QSYEnable:       false,
 		QSYPort:         54321,
+		QSYEnableSSL:    false,
 	}
 
 	var currentProfileName string
@@ -593,8 +916,11 @@ func main() {
 	logLevel := flag.String("log-level", defaultConfig.LogLevel, "Logging level: 'debug', 'info', 'warn', or 'error'.")
 	websocketEnable := flag.Bool("websocket-enable", defaultConfig.WebSocketEnable, "Enable WebSocket server for real-time radio status.")
 	websocketPort := flag.Int("websocket-port", defaultConfig.WebSocketPort, "WebSocket server port (default: 54322).")
+	wssEnable := flag.Bool("wss-enable", defaultConfig.WSSEnable, "Enable WebSocket Secure server (WSS) for encrypted connections.")
+	wssPort := flag.Int("wss-port", defaultConfig.WSSPort, "WebSocket Secure server port (default: 54323).")
 	qsyEnable := flag.Bool("qsy-enable", defaultConfig.QSYEnable, "Enable QSY HTTP server.")
 	qsyPort := flag.Int("qsy-port", defaultConfig.QSYPort, "QSY HTTP server port (default: 54321).")
+	qsyEnableSSL := flag.Bool("qsy-enable-ssl", defaultConfig.QSYEnableSSL, "Enable HTTPS for QSY server (dual HTTP/HTTPS on same port).")
 
 	// Parse flags initially to handle the special -save-profile and -set-default-profile flags
 	flag.Parse()
@@ -665,10 +991,16 @@ func main() {
 			currentProfileConfig.WebSocketEnable = *websocketEnable
 		case "websocket-port":
 			currentProfileConfig.WebSocketPort = *websocketPort
+		case "wss-enable":
+			currentProfileConfig.WSSEnable = *wssEnable
+		case "wss-port":
+			currentProfileConfig.WSSPort = *wssPort
 		case "qsy-enable":
 			currentProfileConfig.QSYEnable = *qsyEnable
 		case "qsy-port":
 			currentProfileConfig.QSYPort = *qsyPort
+		case "qsy-enable-ssl":
+			currentProfileConfig.QSYEnableSSL = *qsyEnableSSL
 		}
 	})
 
@@ -723,17 +1055,49 @@ func main() {
 		log.Fatalf("Fatal: Invalid interval duration format: %v", err)
 	}
 
+	// Load or create SSL certificates if SSL is enabled
+	var certPath, keyPath string
+	sslEnabled := currentProfileConfig.WSSEnable || currentProfileConfig.QSYEnableSSL
+	if sslEnabled {
+		certPath, keyPath, err = loadOrCreateCertificate()
+		if err != nil {
+			log.Fatalf("Fatal: Failed to load or create SSL certificates: %v", err)
+		}
+	}
+
+	// Track both WebSocket servers for broadcasting
+	type wsServerRef struct {
+		server *WebSocketServer
+		isWSS  bool
+	}
+	var wsServers []wsServerRef
+
 	var webSocketServer *WebSocketServer
 	if currentProfileConfig.WebSocketEnable {
 		var err error
 		webSocketServer, err = startWebSocketServer(currentProfileConfig.WebSocketPort)
 		if err != nil {
 			log.Errorf("Failed to start WebSocket server: %v", err)
+		} else {
+			wsServers = append(wsServers, wsServerRef{server: webSocketServer, isWSS: false})
 		}
 	}
 
+	var wssServer *WebSocketServer
+	if currentProfileConfig.WSSEnable && sslEnabled {
+		var err error
+		wssServer, err = startWSSServer(currentProfileConfig.WSSPort, certPath, keyPath)
+		if err != nil {
+			log.Errorf("Failed to start WebSocket Secure server: %v", err)
+		} else {
+			wsServers = append(wsServers, wsServerRef{server: wssServer, isWSS: true})
+		}
+	} else if currentProfileConfig.WSSEnable && !sslEnabled {
+		log.Warnf("WSS enabled but SSL certificates not available. WSS server not started.")
+	}
+
 	if currentProfileConfig.QSYEnable {
-		_, err := startQSYServer(client, currentProfileConfig.QSYPort)
+		_, err := startQSYServer(client, currentProfileConfig.QSYPort, currentProfileConfig.QSYEnableSSL, certPath, keyPath)
 		if err != nil {
 			log.Errorf("Failed to start QSY server: %v", err)
 		}
@@ -745,8 +1109,16 @@ func main() {
 	if currentProfileConfig.WebSocketEnable {
 		log.Infof("WebSocket server enabled on port %d", currentProfileConfig.WebSocketPort)
 	}
+	if currentProfileConfig.WSSEnable {
+		log.Infof("WebSocket Secure server enabled on port %d", currentProfileConfig.WSSPort)
+	}
 	if currentProfileConfig.QSYEnable {
-		log.Infof("QSY server enabled on port %d", currentProfileConfig.QSYPort)
+		log.Infof("QSY HTTP server enabled on port %d", currentProfileConfig.QSYPort)
+		log.Infof("QSY endpoint: http://localhost:%d/{frequency}/{mode}", currentProfileConfig.QSYPort)
+		if currentProfileConfig.QSYEnableSSL {
+			log.Infof("QSY HTTPS server enabled on port %d", currentProfileConfig.QSYPort)
+			log.Infof("QSY HTTPS endpoint: https://localhost:%d/{frequency}/{mode}", currentProfileConfig.QSYPort)
+		}
 	}
 
 	for {
@@ -782,8 +1154,8 @@ func main() {
 		lastUpdate = time.Now()
 		log.Debug("Successfully updated Wavelog.")
 
-		// Broadcast to WebSocket clients if enabled
-		if currentProfileConfig.WebSocketEnable && webSocketServer != nil {
+		// Broadcast to all WebSocket clients (both WS and WSS) if enabled
+		for _, wsRef := range wsServers {
 			wsMessage := WebSocketMessage{
 				Type:      "radio_status",
 				Frequency: int(currentData.FreqVFOA),
@@ -797,7 +1169,7 @@ func main() {
 				wsMessage.FrequencyRX = int(currentData.FreqVFOA)
 				wsMessage.Frequency = int(currentData.FreqVFOB)
 			}
-			broadcastToWavelog(webSocketServer, wsMessage)
+			broadcastToWavelog(wsRef.server, wsMessage)
 		}
 	}
 }

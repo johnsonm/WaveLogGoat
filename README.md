@@ -21,6 +21,17 @@ This tool replaces the JavaScript-based `WaveLogGate` with a single, statically 
     - `-log-level=warn`: Shows non-critical errors (e.g., failed to get one data point).
     - `-log-level=info`: Shows successful updates and configuration loading.
     - `-log-level=debug`: Shows connection errors and unchanged data polls.
+- **Real-time Radio Status Broadcasting:**
+    - **WebSocket Server (WS):** Broadcasts radio status changes to connected clients in real-time.
+    - **WebSocket Secure Server (WSS):** Encrypted WebSocket connections for secure communication.
+    - Compatible with WaveLogGate client format.
+- **HTTP QSY Server:**
+    - Remote frequency/mode control via HTTP API.
+    - Supports both HTTP and HTTPS (dual listener on same port).
+- **SSL/TLS Support:**
+    - Automatic self-signed certificate generation for localhost.
+    - Platform-specific certificate installation instructions.
+    - Secure connections for WSS and HTTPS QSY endpoints.
 
 ## How to Use
 
@@ -60,6 +71,11 @@ go build
 - **Linux:** `~/.config/WaveLogGoat/config.json`
 - **Windows:** `%APPDATA%\WaveLogGoat\config.json`
 - **macOS:** `~/Library/Application Support/WaveLogGoat/config.json`
+
+**Certificate Location (for SSL/TLS):**
+- **Linux:** `~/.config/WaveLogGoat/waveloggoat.crt` and `waveloggoat.key`
+- **Windows:** `%APPDATA%\WaveLogGoat\waveloggoat.crt` and `waveloggoat.key`
+- **macOS:** `~/Library/Application Support/WaveLogGoat/waveloggoat.crt` and `waveloggoat.key`
 
 #### Creating Your First Profile
 
@@ -113,9 +129,8 @@ To override one setting (like the log level) for a single run:
 ./waveloggoat -log-level=debug
 ```
 
-### Command-Line Flags
-
-```sh
+### Command-Line Options
+```
 Usage of ./waveloggoat:
   -data-source string
     	Data source: 'flrig' or 'hamlib'. (default "flrig")
@@ -135,6 +150,8 @@ Usage of ./waveloggoat:
     	Select a named configuration profile to run (overrides default).
   -qsy-enable
     	Enable QSY HTTP server.
+  -qsy-enable-ssl
+    	Enable HTTPS for QSY server (dual HTTP/HTTPS on same port).
   -qsy-port int
     	QSY HTTP server port (default: 54321). (default 54321)
   -radio-name string
@@ -153,11 +170,15 @@ Usage of ./waveloggoat:
     	Enable WebSocket server for real-time radio status. (default true)
   -websocket-port int
     	WebSocket server port (default: 54322). (default 54322)
+  -wss-enable
+    	Enable WebSocket Secure server (WSS) for encrypted connections.
+  -wss-port int
+    	WebSocket Secure server port (default: 54323). (default 54323)
 ```
 
 ### Wavelog API Format
 
-This tool sends data to Wavelog using the JSON format:
+This tool sends data to Wavelog using the new JSON format:
 
 - **Endpoint:** `(your-wavelog-url)/api/v2/radio` (The `/api/v2/radio` path is added automatically; the old /api/radio API is not supported)
 - **Method:** `POST`
@@ -173,3 +194,212 @@ This tool sends data to Wavelog using the JSON format:
     "mode_rx": "DATA" // Optional: Only sent when split
   }
   ```
+
+## WebSocket/WSS Server
+
+WaveLogGoat includes a WebSocket server that broadcasts real-time radio status changes to connected clients. This is c
+mpatible with the WaveLogGate client format.
+
+### WebSocket (WS) - Default Port 54322
+
+```javascript
+// Example JavaScript client
+const socket = new WebSocket('ws://localhost:54322/');
+socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'radio_status') {
+        console.log(`Frequency: ${data.frequency} Hz, Mode: ${data.mode}`);
+    }
+};
+```
+
+### WebSocket Secure (WSS) - Default Port 54323
+
+When SSL is enabled, WaveLogGoat generates a self-signed certificate and starts a WSS server:
+
+```sh
+./waveloggoat -wss-enable
+```
+
+```javascript
+// Example WSS client
+const socket = new WebSocket('wss://localhost:54323/');
+socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'radio_status') {
+        console.log(`Frequency: ${data.frequency} Hz, Mode: ${data.mode}`);
+    }
+};
+```
+
+### Message Format
+
+Radio status messages are sent in the following JSON format:
+
+```json
+{
+  "type": "radio_status",
+  "frequency": 14075000,
+  "mode": "USB",
+  "power": 100,
+  "split": 0,
+  "radio": "IC-7300",
+  "timestamp": 1704067200000
+}
+```
+
+For split mode operation:
+```json
+{
+  "type": "radio_status",
+  "frequency": 14075000,
+  "frequency_rx": 14074000,
+  "mode": "USB",
+  "mode_rx": "USB",
+  "power": 100,
+  "split": 1,
+  "radio": "IC-7300",
+  "timestamp": 1704067200000
+}
+```
+
+## HTTP QSY Server
+
+WaveLogGoat includes an HTTP API for remote frequency and mode control (QSY). This allows WaveLog or other applications to change the radio frequency and mode.
+
+### QSY Endpoint
+
+- **HTTP:** `http://localhost:54321/{frequency}/{mode}`
+- **HTTPS:** `https://localhost:54321/{frequency}/{mode}` (when `-qsy-enable-ssl` is set)
+
+### Example Usage
+
+```bash
+# Set radio to 7.155 MHz LSB
+curl http://localhost:54321/7155000/LSB
+
+# Using HTTPS (requires SSL certificate to be installed)
+curl -k https://localhost:54321/7155000/LSB
+```
+
+### Response Format
+
+Success response:
+```json
+{
+  "status": "success",
+  "message": "QSY successful: frequency=7155000 Hz, mode=LSB",
+  "frequency": 7155000,
+  "mode": "LSB"
+}
+```
+
+Error response (radio control software not available):
+```json
+{
+  "error": "QSY failed: radio control software not available",
+  "details": "connection refused"
+}
+```
+
+### Supported Modes
+
+USB, LSB, CW, AM, FM, PKTUSB, PKTLSB, RTTY, CWR, PKTFM, DIGI, DIGU, DIGL
+
+
+## SSL/TLS Support
+
+WaveLogGoat includes automatic SSL/TLS certificate generation for secure connections.
+
+### Certificate Generation
+
+When you enable SSL features (`-wss-enable` or `-qsy-enable-ssl`), WaveLogGoat automatically:
+
+1. Generates a self-signed ECDSA P-256 certificate for localhost
+2. Saves the certificate and private key to the config directory
+3. Displays platform-specific installation instructions
+
+The certificate is valid for 10 years and includes the following Subject Alternative Names:
+- `localhost`
+- `127.0.0.1`
+- `::1`
+
+### Certificate Installation
+
+For browsers to trust the self-signed certificate, it must be installed in your system's certificate trust store.
+
+#### macOS
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Library/Application\ Support/WaveLogGoat/waveloggoat.crt
+```
+
+**Alternative (via GUI):**
+1. Open Keychain Access (Applications > Utilities > Keychain Access)
+2. Drag the certificate file into the 'System' keychain
+3. Find the certificate, double-click it, and expand 'Trust'
+4. Set 'When using this certificate' to 'Always Trust'
+5. Close the dialog and enter your password if prompted
+
+#### Windows
+
+```cmd
+certutil -addstore -f Root %APPDATA%\WaveLogGoat\waveloggoat.crt
+```
+
+**Alternative (via GUI):**
+1. Double-click the certificate file
+2. Click 'Install Certificate'
+3. Select 'Local Machine' > Next
+4. Select 'Place all certificates in the following store'
+5. Click 'Browse' and select 'Trusted Root Certification Authorities'
+6. Click Finish
+
+#### Linux
+
+**Debian/Ubuntu:**
+```bash
+sudo cp ~/.config/WaveLogGoat/waveloggoat.crt /usr/local/share/ca-certificates/waveloggoat.crt
+sudo update-ca-certificates
+```
+
+**Fedora/RHEL/CentOS:**
+```bash
+sudo cp ~/.config/WaveLogGoat/waveloggoat.crt /etc/pki/ca-trust/source/anchors/waveloggoat.crt
+sudo update-ca-trust
+```
+
+**Arch Linux:**
+```bash
+sudo trust anchor ~/.config/WaveLogGoat/waveloggoat.crt
+```
+
+**Note:** Some browsers (like Firefox) manage their own certificate store. You may need to import the certificate directly in your browser settings.
+
+### Enabling SSL Features
+
+```bash
+# Enable WebSocket Secure only
+./waveloggoat -wss-enable
+
+# Enable HTTPS for QSY server
+./waveloggoat -qsy-enable-ssl
+
+# Enable both
+./waveloggoat -wss-enable -qsy-enable-ssl
+
+# Save SSL settings to profile
+./waveloggoat -save-profile="ssl-profile" -wss-enable -qsy-enable-ssl
+```
+
+## Network Ports
+
+- **12345:** Default flrig XML-RPC port
+- **4532:** Default hamlib rigctld port
+- **54321:** HTTP/HTTPS QSY server port
+- **54322:** WebSocket (WS) server port
+- **54323:** WebSocket Secure (WSS) server port
+
+## License
+
+MIT License - See LICENSE file for details.
