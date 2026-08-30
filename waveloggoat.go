@@ -38,34 +38,35 @@ var version = "dev"
 // WebSocketMessage represents the JSON message sent to wavelog
 // Matches WaveLogGate format exactly
 type WebSocketMessage struct {
-	Type         string  `json:"type"`          // radio_status
-	Message      string  `json:"message,omitempty"` // Welcome message only
-	Frequency    int     `json:"frequency,omitempty"`    // Frequency in Hz
-	FrequencyRX  int     `json:"frequency_rx,omitempty"` // RX frequency for split mode
-	Mode         string  `json:"mode,omitempty"`        // Operating mode
-	Power        int     `json:"power,omitempty"`       // Power in watts
-	Radio        string  `json:"radio,omitempty"`       // Radio name
-	Timestamp    int64   `json:"timestamp,omitempty"`   // Unix timestamp
+	Type        string `json:"type"`                   // radio_status
+	Message     string `json:"message,omitempty"`      // Welcome message only
+	Frequency   int    `json:"frequency,omitempty"`    // Frequency in Hz
+	FrequencyRX int    `json:"frequency_rx,omitempty"` // RX frequency for split mode
+	Mode        string `json:"mode,omitempty"`         // Operating mode
+	Power       int    `json:"power,omitempty"`        // Power in watts
+	Radio       string `json:"radio,omitempty"`        // Radio name
+	Timestamp   int64  `json:"timestamp,omitempty"`    // Unix timestamp
 }
 
 // RigData holds the radio state as provided by flrig or hamlib.
 type RigData struct {
-	FreqVFOA float64
-	FreqVFOB float64
-	Mode   string
-	ModeB    string
-	Split    int
-	Power    float64
+	FreqVFOA   float64
+	FreqVFOB   float64
+	Mode       string
+	ModeB      string
+	Split      int
+	Power      float64
+	PowerValid bool
 }
 
 // WavelogJSONRequest matches the required JSON payload for the Wavelog API update.
 type WavelogJSONRequest struct {
-	Radio       string  `json:"radio"`
-	Power       float64 `json:"power"`
-	Frequency   int     `json:"frequency"`
-	Mode        string  `json:"mode"`
-	FrequencyRX int     `json:"frequency_rx,omitempty"`
-	ModeRX      string  `json:"mode_rx,omitempty"`
+	Radio       string   `json:"radio"`
+	Power       *float64 `json:"power,omitempty"`
+	Frequency   int      `json:"frequency"`
+	Mode        string   `json:"mode"`
+	FrequencyRX int      `json:"frequency_rx,omitempty"`
+	ModeRX      string   `json:"mode_rx,omitempty"`
 }
 
 type WavelogErrorResponse struct {
@@ -76,25 +77,25 @@ type WavelogErrorResponse struct {
 }
 
 type ProfileConfig struct {
-	WavelogURL      string `json:"wavelog_url"`
-	WavelogKey      string `json:"wavelog_key"`
-	RadioName       string `json:"radio_name"`
-	FlrigHost       string `json:"flrig_host"`
-	FlrigPort       int    `json:"flrig_port"`
-	HamlibHost      string `json:"hamlib_host"`
-	HamlibPort      int    `json:"hamlib_port"`
-	Interval        string `json:"interval"`
-	DataSource      string `json:"data_source"`      // "flrig" or "hamlib"
-	LogLevel        string `json:"log_level"`        // "error", "warn", "info", "debug"
-	WebSocketEnable bool   `json:"websocket_enable"` // enable WebSocket server
-	WebSocketPort   int    `json:"websocket_port"`   // WebSocket server port (default: 54322)
-	WSSEnable       bool   `json:"wss_enable"`       // enable WebSocket Secure server
-	WSSPort         int    `json:"wss_port"`         // WebSocket Secure server port (default: 54323)
-	QSYEnable       bool   `json:"qsy_enable"`       // enable HTTP QSY server
-	QSYPort         int    `json:"qsy_port"`         // HTTP QSY server port (default: 54321)
-	QSYEnableSSL    bool   `json:"qsy_enable_ssl"`   // enable HTTPS for QSY server (dual HTTP/HTTPS)
-	}
-
+	WavelogURL      string  `json:"wavelog_url"`
+	WavelogKey      string  `json:"wavelog_key"`
+	RadioName       string  `json:"radio_name"`
+	FlrigHost       string  `json:"flrig_host"`
+	FlrigPort       int     `json:"flrig_port"`
+	HamlibHost      string  `json:"hamlib_host"`
+	HamlibPort      int     `json:"hamlib_port"`
+	MaxPower        float64 `json:"max_power"` // rig max RF power in watts; if >0 hamlib reports watts, else percent
+	Interval        string  `json:"interval"`
+	DataSource      string  `json:"data_source"`      // "flrig" or "hamlib"
+	LogLevel        string  `json:"log_level"`        // "error", "warn", "info", "debug"
+	WebSocketEnable bool    `json:"websocket_enable"` // enable WebSocket server
+	WebSocketPort   int     `json:"websocket_port"`   // WebSocket server port (default: 54322)
+	WSSEnable       bool    `json:"wss_enable"`       // enable WebSocket Secure server
+	WSSPort         int     `json:"wss_port"`         // WebSocket Secure server port (default: 54323)
+	QSYEnable       bool    `json:"qsy_enable"`       // enable HTTP QSY server
+	QSYPort         int     `json:"qsy_port"`         // HTTP QSY server port (default: 54321)
+	QSYEnableSSL    bool    `json:"qsy_enable_ssl"`   // enable HTTPS for QSY server (dual HTTP/HTTPS)
+}
 
 type ConfigFile struct {
 	DefaultProfile string                   `json:"default_profile"`
@@ -135,8 +136,9 @@ func (f *FlrigClient) SetData(freq float64, mode string) error {
 
 // implements RadioClient for TCP communication with rigctld / hamlib
 type HamlibClient struct {
-	Host string
-	Port int
+	Host     string
+	Port     int
+	MaxPower float64
 }
 
 func (h *HamlibClient) SetData(freq float64, mode string) error {
@@ -421,6 +423,7 @@ func (f *FlrigClient) GetData() (RigData, error) {
 		power = 0
 	}
 	data.Power = float64(power)
+	data.PowerValid = true
 
 	if err := client.Call("rig.get_split", nil, &data.Split); err != nil {
 		log.Warnf("call failed to rig.get_split (flrig): %v. Sending Split=0.", err)
@@ -445,6 +448,21 @@ func (f *FlrigClient) GetData() (RigData, error) {
 	return data, nil
 }
 
+// readReply reads exactly n lines from a rigctld connection. Each rigctld command
+// returns a fixed number of response lines; reading fewer leaves stale data in the
+// bufio buffer that pollutes the next read.
+func readReply(reader *bufio.Reader, n int) ([]string, error) {
+	lines := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		line, _, err := reader.ReadLine()
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, string(line))
+	}
+	return lines, nil
+}
+
 func (h *HamlibClient) GetData() (RigData, error) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
 	if err != nil {
@@ -455,53 +473,55 @@ func (h *HamlibClient) GetData() (RigData, error) {
 	reader := bufio.NewReader(conn)
 	data := RigData{}
 
-	// Query Frequency (VFO A)
+	// Query Frequency (VFO A) — 1 line
 	if _, err := fmt.Fprintf(conn, "f\n"); err != nil {
 		return RigData{}, fmt.Errorf("failed to send 'f' command to hamlib: %w", err)
 	}
-	freqStr, _, err := reader.ReadLine()
+	freqLines, err := readReply(reader, 1)
 	if err != nil {
 		return RigData{}, fmt.Errorf("failed to read frequency response from hamlib: %w", err)
 	}
-	data.FreqVFOA, err = strconv.ParseFloat(string(freqStr), 64)
+	data.FreqVFOA, err = strconv.ParseFloat(freqLines[0], 64)
 	if err != nil {
-		return RigData{}, fmt.Errorf("failed to parse frequency '%s': %w", freqStr, err)
+		return RigData{}, fmt.Errorf("failed to parse frequency '%s': %w", freqLines[0], err)
 	}
 
 	// Query Mode (TX/RX mode is assumed to be the same, and no separate RX mode is readily available)
+	// Returns Mode and Passband (2 lines)
 	if _, err := fmt.Fprintf(conn, "m\n"); err != nil {
 		return RigData{}, fmt.Errorf("failed to send 'm' command to hamlib: %w", err)
 	}
-	modeResp, _, err := reader.ReadLine() // e.g., "USB"
+	modeLines, err := readReply(reader, 2)
 	if err != nil {
 		return RigData{}, fmt.Errorf("failed to read mode response from hamlib: %w", err)
 	}
-	data.Mode = string(modeResp)
-	data.ModeB = string(modeResp)
+	data.Mode = modeLines[0]
+	data.ModeB = modeLines[0]
 
-	// Discard next line (bandwidth) directly following mode
-	if _, _, err := reader.ReadLine(); err != nil {
-		log.Warnf("Failed to read mode bandwidth response from hamlib: %v.", err)
-	}
-
-	// Query Power (P)
+	// Query Power (P) — 1 line
 	if _, err := fmt.Fprintf(conn, "l RFPOWER\n"); err != nil {
-		log.Warnf("Failed to send 'l RFPOWER' (power) command to hamlib: %v. Sending 0 W.", err)
+		log.Warnf("Failed to send 'l RFPOWER' (power) command to hamlib: %v.", err)
 		data.Power = 0.0
+		data.PowerValid = false
 	} else {
-		powerStr, _, err := reader.ReadLine()
+		powerLines, err := readReply(reader, 1)
 		if err != nil {
-			log.Warnf("Failed to read power response from hamlib: %v. Sending 0 W.", err)
+			log.Warnf("Failed to read power response from hamlib: %v.", err)
 			data.Power = 0.0
+			data.PowerValid = false
 		} else {
-			// Hamlib returns 0-1 float percentage
-			powerPercent, err := strconv.ParseFloat(string(powerStr), 64)
+			powerPercent, err := strconv.ParseFloat(powerLines[0], 64)
 			if err != nil {
-				log.Warnf("Failed to parse power '%s': %v. Sending 0 W.", powerStr, err)
+				log.Warnf("Failed to parse power '%s': %v.", powerLines[0], err)
 				data.Power = 0.0
+				data.PowerValid = false
 			} else {
-				// Convert percentage to 100W max for simple display (Wavelog typically expects watts)
-				data.Power = powerPercent * 100
+				if h.MaxPower > 0 {
+					data.Power = powerPercent // Already in watts
+				} else {
+					data.Power = powerPercent * 100 // Convert percentage to watts (assume 100W max)
+				}
+				data.PowerValid = true
 			}
 		}
 	}
@@ -516,9 +536,12 @@ func (h *HamlibClient) GetData() (RigData, error) {
 func postToWavelog(config ProfileConfig, data RigData) error {
 	payload := WavelogJSONRequest{
 		Radio:     config.RadioName,
-		Power:     data.Power,
 		Frequency: int(data.FreqVFOA),
 		Mode:      data.Mode,
+	}
+	if data.PowerValid {
+		p := data.Power
+		payload.Power = &p
 	}
 	if data.Split != 0 {
 		payload.Frequency = int(data.FreqVFOB)
@@ -541,7 +564,7 @@ func postToWavelog(config ProfileConfig, data RigData) error {
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer " + config.WavelogKey)
+	req.Header.Set("Authorization", "Bearer "+config.WavelogKey)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -568,10 +591,10 @@ func postToWavelog(config ProfileConfig, data RigData) error {
 }
 
 type WebSocketServer struct {
-	clients    map[*websocket.Conn]bool
-	clientsMu  sync.RWMutex
-	upgrader   websocket.Upgrader
-	port       int
+	clients   map[*websocket.Conn]bool
+	clientsMu sync.RWMutex
+	upgrader  websocket.Upgrader
+	port      int
 }
 
 func broadcastToWavelog(server *WebSocketServer, message WebSocketMessage) {
@@ -871,7 +894,6 @@ func startQSYServer(client RadioClient, port int, enableSSL bool, certPath, keyP
 
 	return httpServer, nil
 }
-
 
 func main() {
 	defaultConfig := ProfileConfig{
