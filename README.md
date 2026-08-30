@@ -47,7 +47,7 @@ chmod +x waveloggoat
 
 You must have the [Go](https://go.dev/doc/install) toolchain (version 1.21+) installed.
 
-It is recommended to have [GoReaser installed](https://goreleaser.com/install/)
+It is recommended to have [GoReleaser installed](https://goreleaser.com/install/)
 
 ```sh
 # git clone https://github.com/johnsonm/WaveLogGoat
@@ -193,7 +193,7 @@ This tool sends data to Wavelog using the new JSON format:
     "frequency_rx": 14076000, // Optional: Only sent when split
     "mode_rx": "DATA" // Optional: Only sent when split
   }
-  ```
+```
 
 ## WebSocket/WSS Server
 
