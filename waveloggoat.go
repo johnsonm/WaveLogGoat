@@ -28,7 +28,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kolo/xmlrpc"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/mod/semver"
 )
 
 var log = logrus.New()
@@ -582,7 +581,7 @@ func postToWavelog(config ProfileConfig, data RigData, version string) error {
 	}
 
 	if data.PowerValid {
-		if semver.Compare("v"+version, "v3.2.0") >= 0 {
+		if version == "3.2.0" {
 			payload.Power = int(data.Power)
 		} else {
 			payload.Power = data.Power
