@@ -28,6 +28,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kolo/xmlrpc"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/mod/semver"
 )
 
 var log = logrus.New()
@@ -62,7 +63,7 @@ type RigData struct {
 // WavelogJSONRequest matches the required JSON payload for the Wavelog API update.
 type WavelogJSONRequest struct {
 	Radio       string   `json:"radio"`
-	Power       *float64 `json:"power,omitempty"`
+	Power       interface{} `json:"power,omitempty"`
 	Frequency   int      `json:"frequency"`
 	Mode        string   `json:"mode"`
 	FrequencyRX int      `json:"frequency_rx,omitempty"`
@@ -573,16 +574,21 @@ func fetchWavelogVersion(config ProfileConfig) (string, error) {
 	return result.Version, nil
 }
 
-func postToWavelog(config ProfileConfig, data RigData) error {
+func postToWavelog(config ProfileConfig, data RigData, version string) error {
 	payload := WavelogJSONRequest{
 		Radio:     config.RadioName,
 		Frequency: int(data.FreqVFOA),
 		Mode:      data.Mode,
 	}
+
 	if data.PowerValid {
-		p := data.Power
-		payload.Power = &p
+		if semver.Compare("v"+version, "v3.2.0") >= 0 {
+			payload.Power = int(data.Power)
+		} else {
+			payload.Power = data.Power
+		}
 	}
+
 	if data.Split != 0 {
 		payload.Frequency = int(data.FreqVFOB)
 		payload.Mode = data.ModeB
@@ -959,6 +965,7 @@ func main() {
 	var currentProfileName string
 	var saveProfileName string
 	var setDefaultProfileName string
+	var wavelogVersion string
 
 	showVersion := flag.Bool("version", false, "Print version information and exit")
 
@@ -1100,11 +1107,11 @@ func main() {
 	}
 
 	if currentProfileConfig.WavelogKeyV1 != "" {
-		version, err := fetchWavelogVersion(currentProfileConfig)
+		wavelogVersion, err := fetchWavelogVersion(currentProfileConfig)
 		if err != nil {
 			log.Errorf("Failed to fetch Wavelog version: %v", err)
 		} else {
-			log.Infof("Wavelog API version: %s", version)
+			log.Infof("Wavelog API version: %s", wavelogVersion)
 		}
 	} else {
 		log.Infof("Wavelog V1 API key not provided; skipping version check. Add -wavelog-key-v1 to see version info.")
@@ -1181,6 +1188,7 @@ func main() {
 	}
 
 	var lastData RigData
+
 	lastUpdate := time.Time{}
 	log.Infof("Starting WaveLogGoat polling every %s...", intervalDuration)
 	if currentProfileConfig.WebSocketEnable {
@@ -1222,7 +1230,7 @@ func main() {
 
 		log.Infof("Radio state changed; freq: %.0f Hz, mode: %s). Updating Wavelog...", currentData.FreqVFOA, currentData.Mode)
 
-		if err := postToWavelog(currentProfileConfig, currentData); err != nil {
+		if err := postToWavelog(currentProfileConfig, currentData, wavelogVersion); err != nil {
 			log.Errorf("Error posting to Wavelog: %v", err)
 			continue
 		}

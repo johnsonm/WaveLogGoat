@@ -1,6 +1,6 @@
 module waveloggoat
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/gorilla/websocket v1.4.2
@@ -8,4 +8,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 )
 
-require golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+require (
+	golang.org/x/mod v0.40.0 // indirect
+	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+)
