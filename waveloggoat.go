@@ -520,7 +520,7 @@ func (h *HamlibClient) GetData() (RigData, error) {
 				if h.MaxPower > 0 {
 					data.Power = powerPercent // Already in watts
 				} else {
-					data.Power = powerPercent * 100 // Convert percentage to watts (assume 100W max)
+					data.Power = powerPercent * 100 // Will be normalized by ProfileConfig.MaxPower on send
 				}
 				data.PowerValid = true
 			}
@@ -581,10 +581,15 @@ func postToWavelog(config ProfileConfig, data RigData, version string) error {
 	}
 
 	if data.PowerValid {
+		maxPower := config.MaxPower
+		if maxPower == 0.0 {
+			maxPower = 100
+		}
+		power := data.Power / 100 * maxPower
 		if version == "3.2.0" {
-			payload.Power = int(data.Power)
+			payload.Power = int(power)
 		} else {
-			payload.Power = data.Power
+			payload.Power = power
 		}
 	}
 
@@ -976,6 +981,7 @@ func main() {
 	wavelogKey := flag.String("wavelog-key", defaultConfig.WavelogKey, "Wavelog API Key, starting with `wl2_`.")
 	wavelogKeyV1 := flag.String("wavelog-key-v1", defaultConfig.WavelogKeyV1, "Wavelog V1 API Key.")
 	radioName := flag.String("radio-name", defaultConfig.RadioName, "Name of the radio (e.g., FT-891).")
+	maxPower := flag.Float64("max-power", defaultConfig.MaxPower, "Maximum RF power in watts (default 100).")
 	flrigHost := flag.String("flrig-host", defaultConfig.FlrigHost, "flrig XML-RPC host address.")
 	flrigPort := flag.Int("flrig-port", defaultConfig.FlrigPort, "flrig XML-RPC port.")
 	hamlibHost := flag.String("hamlib-host", defaultConfig.HamlibHost, "Hamlib rigctld host address.")
@@ -1044,6 +1050,8 @@ func main() {
 			currentProfileConfig.WavelogKeyV1 = *wavelogKeyV1
 		case "radio-name":
 			currentProfileConfig.RadioName = *radioName
+		case "max-power":
+			currentProfileConfig.MaxPower = *maxPower
 		case "flrig-host":
 			currentProfileConfig.FlrigHost = *flrigHost
 		case "flrig-port":

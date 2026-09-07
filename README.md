@@ -81,8 +81,9 @@ go build
 
 The easiest way to get started is by using command-line flags to create and save your first profile.
 
+Create a profile named "IC-7300" using flrig:
+
 ```sh
-# Example: Create a profile named "IC-7300" using flrig
 ./waveloggoat \
     -save-profile="IC-7300" \
     -wavelog-url="https://mywavelog.com/index.php" \
@@ -98,7 +99,23 @@ The easiest way to get started is by using command-line flags to create and save
     -qsy-port=54321
 ```
 
-This command creates the `config.json` file (if it doesn't exist) and saves these settings.
+Create a profile named "IC-705" using hamlib, taking the defaults for host and port,
+and scaling all reported power to the 10W max power when provided by a 13.8V external
+power source:
+
+```sh
+./waveloggoat \
+    -save-profile="IC-705" \
+    -wavelog-url="https://mywavelog.com/index.php" \
+    -wavelog-key="wl2_MY-API-KEY" \
+    -wavelog-key-v1="wlMY-APIv1-KEY" \
+    -radio-name="IC-705" \
+    -data-source="hamlib" \
+    -max-power=10
+```
+
+These commands create the `config.json` file, if it doesn't already exist, and saves the settings
+in the named profile.
 
 #### Setting the Default Profile
 
@@ -147,6 +164,8 @@ Usage of ./waveloggoat:
     	Polling interval (e.g., 1s, 1500ms). (default "1s")
   -log-level string
     	Logging level: 'debug', 'info', 'warn', or 'error'. (default "error")
+  -max-power float
+    	Maximum RF power in watts (default 100).
   -profile string
     	Select a named configuration profile to run (overrides default).
   -qsy-enable
