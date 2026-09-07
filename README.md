@@ -2,7 +2,7 @@
 
 `WaveLogGoat` is a lightweight Go application that polls radio status from `flrig` (via XML-RPC) or `hamlib`'s `rigctld` (via TCP) and sends it to your [Wavelog](https://github.com/wavelog/wavelog) instance.
 
-This tool replaces the JavaScript-based `WaveLogGate` with a single, statically compiled binary that runs as a background service with no runtime dependencies. It supports multiple configuration profiles for different radios or Wavelog instances.
+This tool replaces `WaveLogGate` with a single, command-line configured, statically compiled binary that runs as a background service with no runtime dependencies and no graphical UI. It supports multiple configuration profiles for different radios or Wavelog instances.
 
 ## Features
 
@@ -63,7 +63,7 @@ goreleaser build
 go build
 ```
 
-### 2. Configuration
+### Configuration
 
 `WaveLogGoat` is configured using a `config.json` file, command-line flags, or a combination of both. Flags will always override settings from the config file.
 
@@ -125,7 +125,7 @@ After saving a profile, you can set it as the default.
 ./waveloggoat -set-default-profile="IC-7300"
 ```
 
-### 3. Running the Program
+### Running the Program
 
 Once you have a default profile set, you can run the program with no arguments:
 
@@ -147,8 +147,34 @@ To override one setting (like the log level) for a single run:
 ./waveloggoat -log-level=debug
 ```
 
-### Command-Line Options
+### Automating startup
+
+On Linux, you can automate startup. If the waveloggoat binary is installed as `~/bin/waveloggoat`
+you can create a systemd unit file, and start it immediately as well as on every login with this:
+
+```sh
+$ mkdir -p ~/.config/systemd/user
+$ cat > ~/.config/systemd/user/waveloggoat.service <<EOF
+[Unit]
+Description=WaveLogGoat
+After=graphical-session.target network-online.target
+
+[Service]
+ExecStart=%h/bin/waveloggoat
+Type=simple
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+$ systemctl --user enable --now waveloggoat.service
 ```
+
+## Command-Line Options
+
+The `-help` option will always summarize all available command line options.
+
+```
+$ waveloggoat -help
 Usage of ./waveloggoat:
   -data-source string
     	Data source: 'flrig' or 'hamlib'. (default "flrig")
