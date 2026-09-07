@@ -2,20 +2,21 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
-	"net"
 	"strconv"
 )
 
 // implements RadioClient for TCP communication with rigctld / hamlib
 type HamlibClient struct {
+	ctx      context.Context
 	Host     string
 	Port     int
 	MaxPower float64
 }
 
 func (h *HamlibClient) SetData(freq float64, mode string) error {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
+	conn, err := CustomDialer(h.ctx, "tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
 	if err != nil {
 		return fmt.Errorf("hamlib connection error: %w", err)
 	}
@@ -52,7 +53,7 @@ func readReply(reader *bufio.Reader, n int) ([]string, error) {
 }
 
 func (h *HamlibClient) GetData() (RigData, error) {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
+	conn, err := CustomDialer(h.ctx, "tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
 	if err != nil {
 		return RigData{}, fmt.Errorf("hamlib connection error: %w", err)
 	}

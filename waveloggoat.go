@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -167,7 +168,12 @@ func fetchWavelogVersion(config ProfileConfig) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: CustomDialer,
+		},
+		Timeout: 10 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to execute request: %w", err)
@@ -234,7 +240,12 @@ func postToWavelog(config ProfileConfig, data RigData, version string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+config.WavelogKey)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: CustomDialer,
+		},
+		Timeout: 10 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to execute HTTP request: %w", err)
@@ -420,6 +431,8 @@ func main() {
 		return
 	}
 
+	ctx := context.Background()
+
 	setupLogging(currentProfileConfig.LogLevel)
 
 	if currentProfileConfig.WavelogKey == "" || currentProfileConfig.WavelogKey == defaultConfig.WavelogKey {
@@ -444,10 +457,10 @@ func main() {
 	var client RadioClient
 	switch strings.ToLower(currentProfileConfig.DataSource) {
 	case "flrig":
-		client = &FlrigClient{Host: currentProfileConfig.FlrigHost, Port: currentProfileConfig.FlrigPort}
+		client = &FlrigClient{ctx: ctx, Host: currentProfileConfig.FlrigHost, Port: currentProfileConfig.FlrigPort}
 		log.Infof("Using flrig client at %s:%d (Profile: %s)", currentProfileConfig.FlrigHost, currentProfileConfig.FlrigPort, profileToUse)
 	case "hamlib":
-		client = &HamlibClient{Host: currentProfileConfig.HamlibHost, Port: currentProfileConfig.HamlibPort}
+		client = &HamlibClient{ctx: ctx, Host: currentProfileConfig.HamlibHost, Port: currentProfileConfig.HamlibPort}
 		log.Infof("Using Hamlib client at %s:%d (Profile: %s)", currentProfileConfig.HamlibHost, currentProfileConfig.HamlibPort, profileToUse)
 		log.Warnf("Hamlib support is untested and presumed broken. Please report success or failure to debug or remove this message!")
 	default:

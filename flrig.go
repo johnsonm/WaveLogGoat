@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/kolo/xmlrpc"
@@ -9,12 +11,17 @@ import (
 
 // implements RadioClient for XML-RPC communication with flrig
 type FlrigClient struct {
+	ctx  context.Context
 	Host string
 	Port int
 }
 
 func (f *FlrigClient) SetData(freq float64, mode string) error {
-	client, err := xmlrpc.NewClient(fmt.Sprintf("http://%s:%d/", f.Host, f.Port), nil)
+	httpTransport := &http.Transport{
+		DialContext: CustomDialer, // Wire in our mDNS resolver
+	}
+	// kolo/xmlrpc does not take a context object
+	client, err := xmlrpc.NewClient(fmt.Sprintf("http://%s:%d/", f.Host, f.Port), httpTransport)
 	if err != nil {
 		return err
 	}
@@ -39,7 +46,11 @@ func (f *FlrigClient) GetData() (RigData, error) {
 	var power int
 	var vfoB string
 
-	client, err := xmlrpc.NewClient(fmt.Sprintf("http://%s:%d/", f.Host, f.Port), nil)
+	httpTransport := &http.Transport{
+		DialContext: CustomDialer, // Wire in our mDNS resolver
+	}
+	// kolo/xmlrpc does not take a context object
+	client, err := xmlrpc.NewClient(fmt.Sprintf("http://%s:%d/", f.Host, f.Port), httpTransport)
 	if err != nil {
 		return data, err
 	}
