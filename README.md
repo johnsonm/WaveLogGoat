@@ -241,7 +241,7 @@ This tool sends data to Wavelog using the new JSON format:
     "frequency_rx": 14076000, // Optional: Only sent when split
     "mode_rx": "DATA" // Optional: Only sent when split
   }
-```
+  ```
 
 ## WebSocket/WSS Server
 
