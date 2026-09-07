@@ -87,6 +87,7 @@ The easiest way to get started is by using command-line flags to create and save
     -save-profile="IC-7300" \
     -wavelog-url="https://mywavelog.com/index.php" \
     -wavelog-key="wl2_MY-API-KEY" \
+    -wavelog-key-v1="wlMY-APIv1-KEY" \
     -radio-name="IC-7300" \
     -data-source="flrig" \
     -flrig-host="127.0.0.1" \
@@ -164,6 +165,8 @@ Usage of ./waveloggoat:
     	Print version information and exit
   -wavelog-key wl2_
     	Wavelog API Key, starting with wl2_. (default "wl2_YOUR_API_KEY")
+  -wavelog-key-v1 string
+    	Wavelog V1 API Key.
   -wavelog-url string
     	Wavelog API URL for radio status. (default "http://localhost/index.php")
   -websocket-enable

@@ -79,6 +79,7 @@ type WavelogErrorResponse struct {
 type ProfileConfig struct {
 	WavelogURL      string  `json:"wavelog_url"`
 	WavelogKey      string  `json:"wavelog_key"`
+	WavelogKeyV1    string  `json:"wavelog_key_v1"`
 	RadioName       string  `json:"radio_name"`
 	FlrigHost       string  `json:"flrig_host"`
 	FlrigPort       int     `json:"flrig_port"`
@@ -533,6 +534,45 @@ func (h *HamlibClient) GetData() (RigData, error) {
 	return data, nil
 }
 
+func fetchWavelogVersion(config ProfileConfig) (string, error) {
+	url := config.WavelogURL + "/api/version"
+
+	payload := map[string]string{"key": config.WavelogKeyV1}
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal JSON payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("failed to parse JSON response: %w", err)
+	}
+
+	return result.Version, nil
+}
+
 func postToWavelog(config ProfileConfig, data RigData) error {
 	payload := WavelogJSONRequest{
 		Radio:     config.RadioName,
@@ -928,6 +968,7 @@ func main() {
 
 	wavelogURL := flag.String("wavelog-url", defaultConfig.WavelogURL, "Wavelog API URL for radio status.")
 	wavelogKey := flag.String("wavelog-key", defaultConfig.WavelogKey, "Wavelog API Key, starting with `wl2_`.")
+	wavelogKeyV1 := flag.String("wavelog-key-v1", defaultConfig.WavelogKeyV1, "Wavelog V1 API Key.")
 	radioName := flag.String("radio-name", defaultConfig.RadioName, "Name of the radio (e.g., FT-891).")
 	flrigHost := flag.String("flrig-host", defaultConfig.FlrigHost, "flrig XML-RPC host address.")
 	flrigPort := flag.Int("flrig-port", defaultConfig.FlrigPort, "flrig XML-RPC port.")
@@ -993,6 +1034,8 @@ func main() {
 			currentProfileConfig.WavelogURL = *wavelogURL
 		case "wavelog-key":
 			currentProfileConfig.WavelogKey = *wavelogKey
+		case "wavelog-key-v1":
+			currentProfileConfig.WavelogKeyV1 = *wavelogKeyV1
 		case "radio-name":
 			currentProfileConfig.RadioName = *radioName
 		case "flrig-host":
@@ -1040,7 +1083,7 @@ func main() {
 
 	if saveProfileName != "" {
 		if saveProfileName == "" {
-			log.Fatalf("Fatal: The --save-profile flag requires a profile name.")
+			log.Fatalf("Fatal: The -save-profile flag requires a profile name.")
 		}
 		cfgFile.Profiles[saveProfileName] = currentProfileConfig
 		if err := saveConfig(configPath, cfgFile); err != nil {
@@ -1053,8 +1096,20 @@ func main() {
 	setupLogging(currentProfileConfig.LogLevel)
 
 	if currentProfileConfig.WavelogKey == "" || currentProfileConfig.WavelogKey == defaultConfig.WavelogKey {
-		log.Fatalf("Fatal: Wavelog API key is required. Please set via --wavelog-key or in the config file.")
+		log.Fatalf("Fatal: Wavelog API key is required. Please set via -wavelog-key or in the config file.")
 	}
+
+	if currentProfileConfig.WavelogKeyV1 != "" {
+		version, err := fetchWavelogVersion(currentProfileConfig)
+		if err != nil {
+			log.Errorf("Failed to fetch Wavelog version: %v", err)
+		} else {
+			log.Infof("Wavelog API version: %s", version)
+		}
+	} else {
+		log.Infof("Wavelog V1 API key not provided; skipping version check. Add -wavelog-key-v1 to see version info.")
+	}
+
 	if currentProfileConfig.WavelogURL == "" {
 		log.Fatalf("Fatal: Wavelog URL is required.")
 	}
