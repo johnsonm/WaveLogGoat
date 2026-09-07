@@ -23,7 +23,7 @@ jobs:
       - name: Run Go Tidy
         run: go mod tidy
       - name: Test Build
-        run: go build -v ./waveloggoat.go
+        run: go build -v .
 
   # Job for creating a release
   goreleaser:
