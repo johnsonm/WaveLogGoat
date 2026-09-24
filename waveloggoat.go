@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -87,7 +88,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("WaveLogGoat version:", version)
+		fmt.Printf("WaveLogGoat version: %s\nGo version: %s\n", version, runtime.Version())
 		return
 	}
 
