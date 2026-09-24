@@ -45,7 +45,7 @@ chmod +x waveloggoat
 
 ### Building from Source
 
-You must have the [Go](https://go.dev/doc/install) toolchain (version 1.21+) installed.
+You must have the [Go](https://go.dev/doc/install) toolchain (version 1.25+) installed.
 
 It is recommended to have [GoReleaser installed](https://goreleaser.com/install/)
 
