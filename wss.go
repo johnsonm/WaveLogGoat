@@ -336,9 +336,9 @@ func loadOrCreateCertificate() (certPath, keyPath string, err error) {
 // printCertInstallInstructions prints platform-specific certificate installation instructions
 func printCertInstallInstructions(certPath string) {
 	log.Infof("")
-	log.Infof("=" + strings.Repeat("=", 70))
+	log.Info("=" + strings.Repeat("=", 70))
 	log.Infof("SSL Certificate Installation Required")
-	log.Infof("=" + strings.Repeat("=", 70))
+	log.Info("=" + strings.Repeat("=", 70))
 	log.Infof("")
 	log.Infof("WaveLogGoat has generated a self-signed SSL certificate for HTTPS support.")
 	log.Infof("For browsers to trust this certificate, it must be installed in your")
@@ -395,6 +395,6 @@ func printCertInstallInstructions(certPath string) {
 	log.Infof("")
 	log.Infof("After installation, restart your browser for changes to take effect.")
 	log.Infof("")
-	log.Infof("=" + strings.Repeat("=", 70))
+	log.Info("=" + strings.Repeat("=", 70))
 	log.Infof("")
 }

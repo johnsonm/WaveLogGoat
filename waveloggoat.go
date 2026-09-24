@@ -457,10 +457,13 @@ func main() {
 	var client RadioClient
 	switch strings.ToLower(currentProfileConfig.DataSource) {
 	case "flrig":
-		client = &FlrigClient{ctx: ctx, Host: currentProfileConfig.FlrigHost, Port: currentProfileConfig.FlrigPort}
+		client, err = NewFlrigRadioClient(ctx, currentProfileConfig.FlrigHost, currentProfileConfig.FlrigPort)
+		if err != nil {
+			log.Fatalf("Fatal: Failed to create flrig client: %v", err)
+		}
 		log.Infof("Using flrig client at %s:%d (Profile: %s)", currentProfileConfig.FlrigHost, currentProfileConfig.FlrigPort, profileToUse)
 	case "hamlib":
-		client = &HamlibClient{ctx: ctx, Host: currentProfileConfig.HamlibHost, Port: currentProfileConfig.HamlibPort}
+		client = NewHamlibClient(ctx, currentProfileConfig.HamlibHost, currentProfileConfig.HamlibPort, currentProfileConfig.MaxPower, &defaultConnectionProvider{})
 		log.Infof("Using Hamlib client at %s:%d (Profile: %s)", currentProfileConfig.HamlibHost, currentProfileConfig.HamlibPort, profileToUse)
 		log.Warnf("Hamlib support is untested and presumed broken. Please report success or failure to debug or remove this message!")
 	default:

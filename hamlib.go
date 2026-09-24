@@ -13,10 +13,22 @@ type HamlibClient struct {
 	Host     string
 	Port     int
 	MaxPower float64
+	dialer   ConnectionProvider // Injected dialer
+}
+
+// NewHamlibClient creates a new HamlibClient with the given ConnectionProvider.
+func NewHamlibClient(ctx context.Context, host string, port int, maxPower float64, dialer ConnectionProvider) *HamlibClient {
+	return &HamlibClient{
+		ctx:      ctx,
+		Host:     host,
+		Port:     port,
+		MaxPower: maxPower,
+		dialer:   dialer,
+	}
 }
 
 func (h *HamlibClient) SetData(freq float64, mode string) error {
-	conn, err := CustomDialer(h.ctx, "tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
+	conn, err := h.dialer.Dial(h.ctx, "tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
 	if err != nil {
 		return fmt.Errorf("hamlib connection error: %w", err)
 	}
@@ -53,7 +65,7 @@ func readReply(reader *bufio.Reader, n int) ([]string, error) {
 }
 
 func (h *HamlibClient) GetData() (RigData, error) {
-	conn, err := CustomDialer(h.ctx, "tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
+	conn, err := h.dialer.Dial(h.ctx, "tcp", fmt.Sprintf("%s:%d", h.Host, h.Port))
 	if err != nil {
 		return RigData{}, fmt.Errorf("hamlib connection error: %w", err)
 	}
