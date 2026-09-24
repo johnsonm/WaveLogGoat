@@ -18,19 +18,6 @@ var log = logrus.New()
 // version is set at build time using ldflags
 var version = "dev"
 
-// WebSocketMessage represents the JSON message sent to wavelog
-// Matches WaveLogGate format exactly
-type WebSocketMessage struct {
-	Type        string `json:"type"`                   // radio_status
-	Message     string `json:"message,omitempty"`      // Welcome message only
-	Frequency   int    `json:"frequency,omitempty"`    // Frequency in Hz
-	FrequencyRX int    `json:"frequency_rx,omitempty"` // RX frequency for split mode
-	Mode        string `json:"mode,omitempty"`         // Operating mode
-	Power       int    `json:"power,omitempty"`        // Power in watts
-	Radio       string `json:"radio,omitempty"`        // Radio name
-	Timestamp   int64  `json:"timestamp,omitempty"`    // Unix timestamp
-}
-
 // RigData holds the radio state as provided by flrig or hamlib.
 type RigData struct {
 	FreqVFOA   float64

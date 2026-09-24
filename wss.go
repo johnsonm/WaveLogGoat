@@ -23,6 +23,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// WebSocketMessage represents the JSON message sent to wavelog
+// Matches WaveLogGate format exactly
+type WebSocketMessage struct {
+	Type        string `json:"type"`                   // radio_status
+	Message     string `json:"message,omitempty"`      // Welcome message only
+	Frequency   int    `json:"frequency,omitempty"`    // Frequency in Hz
+	FrequencyRX int    `json:"frequency_rx,omitempty"` // RX frequency for split mode
+	Mode        string `json:"mode,omitempty"`         // Operating mode
+	Power       int    `json:"power,omitempty"`        // Power in watts
+	Radio       string `json:"radio,omitempty"`        // Radio name
+	Timestamp   int64  `json:"timestamp,omitempty"`    // Unix timestamp
+}
+
 type WebSocketServer struct {
 	clients   map[*websocket.Conn]bool
 	clientsMu sync.RWMutex
