@@ -63,7 +63,7 @@ func qsyHandler(client RadioClient) http.HandlerFunc {
 		// Return success response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		response := map[string]interface{}{
+		response := map[string]any{
 			"status":    "success",
 			"message":   fmt.Sprintf("QSY successful: frequency=%d Hz, mode=%s", hz, strings.ToUpper(mode)),
 			"frequency": hz,

@@ -54,7 +54,7 @@ func (h *HamlibClient) SetData(freq float64, mode string) error {
 // bufio buffer that pollutes the next read.
 func readReply(reader *bufio.Reader, n int) ([]string, error) {
 	lines := make([]string, 0, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		line, _, err := reader.ReadLine()
 		if err != nil {
 			return nil, err

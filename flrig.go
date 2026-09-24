@@ -11,7 +11,7 @@ import (
 
 // XMLRPCClient defines the interface for XML-RPC client operations, allowing for mocking in tests.
 type XMLRPCClient interface {
-	Call(method string, args interface{}, reply interface{}) error
+	Call(method string, args any, reply any) error
 	Close() error
 }
 
@@ -40,7 +40,7 @@ func NewFlrigRadioClient(ctx context.Context, host string, port int) (RadioClien
 	return NewFlrigClient(ctx, host, port, rpcClient), nil
 }
 
-func (r *liveXMLRPCClient) Call(method string, args interface{}, reply interface{}) error {
+func (r *liveXMLRPCClient) Call(method string, args any, reply any) error {
 	return r.client.Call(method, args, reply)
 }
 

@@ -12,12 +12,12 @@ import (
 
 // WavelogJSONRequest matches the required JSON payload for the Wavelog API update.
 type WavelogJSONRequest struct {
-	Radio       string      `json:"radio"`
-	Power       interface{} `json:"power,omitempty"`
-	Frequency   int         `json:"frequency"`
-	Mode        string      `json:"mode"`
-	FrequencyRX int         `json:"frequency_rx,omitempty"`
-	ModeRX      string      `json:"mode_rx,omitempty"`
+	Radio       string `json:"radio"`
+	Power       any    `json:"power,omitempty"`
+	Frequency   int    `json:"frequency"`
+	Mode        string `json:"mode"`
+	FrequencyRX int    `json:"frequency_rx,omitempty"`
+	ModeRX      string `json:"mode_rx,omitempty"`
 }
 
 type WavelogErrorResponse struct {

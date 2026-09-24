@@ -40,7 +40,7 @@ func TestQSYHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 
-		var response map[string]interface{}
+		var response map[string]any
 		json.NewDecoder(w.Body).Decode(&response)
 		assert.Equal(t, "success", response["status"])
 		assert.Equal(t, float64(7074000), response["frequency"])

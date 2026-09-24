@@ -14,7 +14,7 @@ type MockXMLRPCClient struct {
 	mock.Mock
 }
 
-func (m *MockXMLRPCClient) Call(method string, args interface{}, reply interface{}) error {
+func (m *MockXMLRPCClient) Call(method string, args any, reply any) error {
 	callArgs := m.Called(method, args, reply)
 
 	// If a reply object is expected, set its value from the mock return.
