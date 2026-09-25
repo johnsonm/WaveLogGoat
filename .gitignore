@@ -1,3 +1,4 @@
 waveloggoat
 *.swp
 dist/
+coverage.*

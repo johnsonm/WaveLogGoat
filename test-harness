@@ -1,0 +1,23 @@
+#!/bin/bash
+go test -coverprofile=coverage.out ./... || { echo "Test failed"; exit 1; }
+
+echo "--- File Coverage Summary ---"
+printf "%-40s | %-10s | %-15s | %-15s\n" "File" "Coverage" "Covered Stmts" "Total Stmts"
+
+grep -v "mode:" coverage.out | awk '{
+    split($1, a, ":");
+    file = a[1];
+    stmts = $2;
+    count = $3;
+    total[file] += stmts;
+    if (count > 0) covered[file] += stmts;
+}
+END {
+    for (f in total) {
+        pct = (total[f] > 0) ? (covered[f] / total[f]) * 100 : 0;
+        printf "%-40s | %-9.2f%% | %-13d | %-13d\n", f, pct, (covered[f]?covered[f]:0), total[f]
+    }
+}'
+go tool cover -func=coverage.out
+go tool cover -html=coverage.out -o coverage.html
+xdg-open file:///$(pwd)/coverage.html
