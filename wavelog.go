@@ -142,3 +142,22 @@ func postToWavelog(config ProfileConfig, data RigData, version string) error {
 
 	return nil
 }
+
+func validateWavelogConfig(config, defaultConfig ProfileConfig) {
+	if config.WavelogKey == "" || config.WavelogKey == defaultConfig.WavelogKey {
+		log.Fatalf("Fatal: Wavelog API key is required. Please set via -wavelog-key or in the config file.")
+	}
+	if config.WavelogURL == "" {
+		log.Fatalf("Fatal: Wavelog URL is required.")
+	}
+	if config.WavelogKeyV1 != "" {
+		wavelogVersion, err := fetchWavelogVersion(config)
+		if err != nil {
+			log.Errorf("Failed to fetch Wavelog version: %v", err)
+		} else {
+			log.Infof("Wavelog API version: %s", wavelogVersion)
+		}
+	} else {
+		log.Infof("Wavelog V1 API key not provided; skipping version check. Add -wavelog-key-v1 to see version info.")
+	}
+}

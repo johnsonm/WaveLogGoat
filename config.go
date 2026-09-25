@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,6 +62,95 @@ func GetDefaultConfig() ProfileConfig {
 	}
 }
 
+// LoadAndMergeConfig loads the config file, merges with CLI flags, and handles profile selection.
+func LoadAndMergeConfig(cliConfig *CLIConfig, fs *flag.FlagSet) (ConfigFile, ProfileConfig, string, error) {
+	defaultConfig := GetDefaultConfig()
+	configPath, err := getConfigPath()
+	if err != nil {
+		return ConfigFile{}, ProfileConfig{}, "", fmt.Errorf("could not determine configuration path: %w", err)
+	}
+
+	cfgFile := ConfigFile{
+		DefaultProfile: "default",
+		Profiles:       make(map[string]ProfileConfig),
+	}
+	loadedCfgFile, err := loadConfig(configPath)
+	if err == nil {
+		cfgFile = loadedCfgFile
+	} else if !os.IsNotExist(err) {
+		return ConfigFile{}, ProfileConfig{}, "", fmt.Errorf("configuration file found but failed to load (%s): %w", configPath, err)
+	}
+
+	profileToUse := cfgFile.DefaultProfile
+	if *cliConfig.Profile != "" {
+		profileToUse = *cliConfig.Profile
+	}
+	if profileToUse == "" {
+		profileToUse = "default"
+	}
+
+	// Merge configuration (Default -> File -> Flags)
+	currentProfileConfig := defaultConfig
+	if p, ok := cfgFile.Profiles[profileToUse]; ok {
+		currentProfileConfig = p
+	}
+
+	// Override config with command-line flags (only those that were set explicitly)
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "wavelog-url":
+			currentProfileConfig.WavelogURL = *cliConfig.WavelogURL
+		case "wavelog-key":
+			currentProfileConfig.WavelogKey = *cliConfig.WavelogKey
+		case "wavelog-key-v1":
+			currentProfileConfig.WavelogKeyV1 = *cliConfig.WavelogKeyV1
+		case "radio-name":
+			currentProfileConfig.RadioName = *cliConfig.RadioName
+		case "max-power":
+			currentProfileConfig.MaxPower = *cliConfig.MaxPower
+		case "flrig-host":
+			currentProfileConfig.FlrigHost = *cliConfig.FlrigHost
+		case "flrig-port":
+			currentProfileConfig.FlrigPort = *cliConfig.FlrigPort
+		case "hamlib-host":
+			currentProfileConfig.HamlibHost = *cliConfig.HamlibHost
+		case "hamlib-port":
+			currentProfileConfig.HamlibPort = *cliConfig.HamlibPort
+		case "interval":
+			currentProfileConfig.Interval = *cliConfig.Interval
+		case "data-source":
+			currentProfileConfig.DataSource = *cliConfig.DataSource
+		case "log-level":
+			currentProfileConfig.LogLevel = *cliConfig.LogLevel
+		case "websocket-enable":
+			currentProfileConfig.WebSocketEnable = *cliConfig.WebSocketEnable
+		case "websocket-port":
+			currentProfileConfig.WebSocketPort = *cliConfig.WebSocketPort
+		case "wss-enable":
+			currentProfileConfig.WSSEnable = *cliConfig.WSSEnable
+		case "wss-port":
+			currentProfileConfig.WSSPort = *cliConfig.WSSPort
+		case "qsy-enable":
+			currentProfileConfig.QSYEnable = *cliConfig.QSYEnable
+		case "qsy-port":
+			currentProfileConfig.QSYPort = *cliConfig.QSYPort
+		case "qsy-enable-ssl":
+			currentProfileConfig.QSYEnableSSL = *cliConfig.QSYEnableSSL
+		}
+	})
+
+	// Handle initial config file creation
+	if os.IsNotExist(err) {
+		cfgFile.Profiles["default"] = defaultConfig
+		if err := saveConfig(configPath, cfgFile); err != nil {
+			return ConfigFile{}, ProfileConfig{}, "", fmt.Errorf("failed to save default configuration file: %w", err)
+		}
+		fmt.Printf("Configuration created successfully at %s\n", configPath)
+	}
+
+	return cfgFile, currentProfileConfig, profileToUse, nil
+}
+
 // getConfigPath returns the path to the configuration file based on the OS.
 func getConfigPath() (string, error) {
 	var configDir string
@@ -103,4 +193,37 @@ func saveConfig(path string, cfg ConfigFile) error {
 		return fmt.Errorf("failed to marshal config to JSON: %w", err)
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+func setDefaultProfile(cliConfig *CLIConfig, cfgFile ConfigFile) bool {
+	if *cliConfig.SetDefaultProfile == "" {
+		return false
+	}
+	configPath, err := getConfigPath()
+	if err != nil {
+		log.Fatalf("Fatal: Could not determine configuration path: %v", err)
+	}
+	if _, ok := cfgFile.Profiles[*cliConfig.SetDefaultProfile]; !ok {
+		log.Fatalf("Cannot set default profile. Profile '%s' does not exist in the configuration file.", *cliConfig.SetDefaultProfile)
+	}
+	cfgFile.DefaultProfile = *cliConfig.SetDefaultProfile
+	if err := saveConfig(configPath, cfgFile); err != nil {
+		log.Fatalf("Fatal: Failed to save configuration file: %v", err)
+	}
+	return true
+}
+
+func saveProfile(config ProfileConfig, cliConfig *CLIConfig, cfgFile ConfigFile) string {
+	if *cliConfig.SaveProfile == "" {
+		return ""
+	}
+	configPath, err := getConfigPath()
+	if err != nil {
+		log.Fatalf("Fatal: Could not determine configuration path: %v", err)
+	}
+	cfgFile.Profiles[*cliConfig.SaveProfile] = config
+	if err := saveConfig(configPath, cfgFile); err != nil {
+		log.Fatalf("Fatal: Failed to save configuration file: %v", err)
+	}
+	return configPath
 }
